@@ -7,6 +7,7 @@ dataset.
 """
 
 import logging
+import os
 import sys
 
 import numpy as np
@@ -29,25 +30,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_panchen_data(file_path="tests/PanChen_test/PanChen.parquet"):
-    """Load PanChen dataset from R data file.
-
-    Args:
-        rdata_file (str): Path to R data file
-
-    Returns:
-        pd.DataFrame: Loaded dataset
-    """
+def load_panchen_data():
+    """Load the PanChen dataset."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(script_dir, "PanChen.parquet")
     logger.info(f"Loading data from {file_path}")
     try:
         data = pd.read_parquet(file_path)
-        logger.info(f"Data shape: {data.shape}")
-        logger.info(f"Columns: {data.columns.tolist()}")
-        # Rename columns for consistency (example: replace spaces, etc.)
-        data.columns = [col.replace(" ", "_") for col in data.columns]
+        logger.info(f"Successfully loaded {len(data)} observations")
         return data
     except Exception as e:
-        logger.error(f"Error loading data: {e}")
+        logger.error(f"Error loading data: {str(e)}")
         raise
 
 
@@ -138,6 +131,35 @@ def prepare_data_for_dsl(data):
             f"{col}: mean={labeled_data[col].mean()}, "
             f"count={labeled_data[col].count()}"
         )
+
+    # Log summary statistics for all model variables in labeled data
+    logger.info("Summary statistics for labeled data variables:")
+    for col in [
+        "SendOrNot",
+        "countyWrong",
+        "prefecWrong",
+        "connect2b",
+        "prevalence",
+        "regionj",
+        "groupIssue",
+    ]:
+        vals = labeled_data[col]
+        logger.info(
+            f"{col}: mean={vals.mean()}, std={vals.std()}, min={vals.min()}, max={vals.max()}, unique={vals.unique()}"
+        )
+
+    # Prepare design matrix and response vector
+    import patsy
+
+    y, X = patsy.dmatrices(
+        "SendOrNot ~ countyWrong + prefecWrong + connect2b + prevalence + regionj + groupIssue",
+        labeled_data,
+        return_type="dataframe",
+    )
+    logger.info("First 5 rows of design matrix X:")
+    logger.info(f"\n{X.head()}\n")
+    logger.info("First 5 values of response vector y:")
+    logger.info(f"\n{y.head()}\n")
 
     # Convert to appropriate types if needed
     # df["some_column"] = df["some_column"].astype(int)
@@ -277,6 +299,40 @@ def main():
         logger.info(f"Result standard errors: {result.standard_errors}")
         logger.info(f"Labeled size: {result.labeled_size}")
         logger.info(f"Total size: {result.total_size}")
+
+        # Log fitted values (Xβ) and predicted probabilities for first 5 rows
+        X_np = X.values
+        coefs = result.coefficients
+        xb = X_np @ coefs
+        logger.info("First 5 fitted values (Xβ):")
+        logger.info(f"{xb[:5]}")
+        # For logistic regression, predicted probability = sigmoid(Xβ)
+        prob = 1 / (1 + np.exp(-xb))
+        logger.info("First 5 predicted probabilities:")
+        logger.info(f"{prob[:5]}")
+
+        # Log variance-covariance matrix and standard errors
+        if hasattr(result, "vcov"):
+            logger.info("Variance-covariance matrix:")
+            logger.info(f"\n{result.vcov}")
+        else:
+            logger.info("Variance-covariance matrix not available in result object.")
+        logger.info("Standard errors:")
+        logger.info(f"{result.standard_errors}")
+
+        # Log log-likelihood at the solution
+        # For logistic regression: sum(y*log(p) + (1-y)*log(1-p)) for labeled data
+        y_np = y.values.flatten()
+        labeled_mask = df["labeled"].values == 1
+        y_labeled = y_np[labeled_mask]
+        prob_labeled = prob[labeled_mask]
+        # Avoid log(0) by clipping
+        prob_labeled = np.clip(prob_labeled, 1e-10, 1 - 1e-10)
+        loglik = np.sum(
+            y_labeled * np.log(prob_labeled)
+            + (1 - y_labeled) * np.log(1 - prob_labeled)
+        )
+        logger.info(f"Log-likelihood at solution (labeled data): {loglik}")
 
         # Format and print results in R-style summary
         summary = format_dsl_results(result, formula)

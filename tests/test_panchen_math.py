@@ -10,10 +10,10 @@ import logging
 import sys
 
 import numpy as np
+from patsy import dmatrices, dmatrix
 
 # Removed unused pandas and stats imports
-from python.data.compare_panchen import load_panchen_data, prepare_data_for_dsl
-from patsy import dmatrices, dmatrix
+from tests.data.compare_panchen import load_panchen_data, prepare_data_for_dsl
 
 # DSL imports
 from dsl import DSLResult, dsl

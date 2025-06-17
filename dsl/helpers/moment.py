@@ -347,7 +347,6 @@ def felm_dsl_moment_base(
     X_pred: np.ndarray,
     fe_Y: np.ndarray,
     fe_X: np.ndarray,
-    n_main_orig: int,
 ) -> np.ndarray:
     """
     Base moment function for fixed effects regression.
@@ -372,28 +371,26 @@ def felm_dsl_moment_base(
         Fixed effects outcome
     fe_X : np.ndarray
         Fixed effects features
-    n_main_orig : int
-        Original number of main effects
 
     Returns
     -------
     np.ndarray
         Moment function value
     """
-    # Split parameters into main effects and fixed effects using n_main_orig
-    par_main = par[:n_main_orig]
-    par_fe = par[n_main_orig:]
+    # Split parameters into main effects and fixed effects
+    n_main = X_orig.shape[1]
+    par_main = par[:n_main]
+    par_fe = par[n_main:]
 
     # Compute fixed effects
     fe_use = fe_Y - fe_X @ par_fe
-    fe_use_flat = fe_use.flatten()  # Flatten for safe broadcasting
 
     # Original moment with fixed effects
-    m_orig = X_orig * (Y_orig - X_orig @ par_main - fe_use_flat).reshape(-1, 1)
+    m_orig = X_orig * (Y_orig - X_orig @ par_main - fe_use).reshape(-1, 1)
     m_orig = m_orig * labeled_ind.reshape(-1, 1)
 
     # Predicted moment with fixed effects
-    m_pred = X_pred * (Y_pred - X_pred @ par_main - fe_use_flat).reshape(-1, 1)
+    m_pred = X_pred * (Y_pred - X_pred @ par_main - fe_use).reshape(-1, 1)
 
     # Combined moment
     m_dr = m_pred + (m_orig - m_pred) * (labeled_ind / sample_prob_use).reshape(-1, 1)
@@ -426,9 +423,8 @@ def demean_dsl(
 
     Returns
     -------
-    Tuple[
-        np.ndarray, np.ndarray, pd.DataFrame
-    ] # Demeaned outcome, features, data frame
+    Tuple[np.ndarray, np.ndarray, pd.DataFrame]
+        Demeaned outcome, features, and data frame
     """
     # Create fixed effect matrix
     fixed_effect_use = pd.get_dummies(data_base[index])
@@ -449,10 +445,9 @@ def demean_dsl(
     )
 
     # Create adjusted data frame
-    adj_data_cols = ["id"] + index + [f"x{i+1}" for i in range(adj_X.shape[1])]
     adj_data = pd.DataFrame(
         np.column_stack([data_base[["id"] + index], adj_X]),
-        columns=adj_data_cols,
+        columns=["id"] + index + [f"x{i+1}" for i in range(adj_X.shape[1])],
     )
 
     return fixed_effect_Y, fixed_effect_X, adj_data
@@ -469,7 +464,6 @@ def felm_dsl_Jacobian(
     model: str,
     fe_Y: np.ndarray,
     fe_X: np.ndarray,
-    n_main_orig: int,
 ) -> np.ndarray:
     """
     Jacobian for fixed effects regression.
@@ -496,22 +490,14 @@ def felm_dsl_Jacobian(
         Fixed effects outcome
     fe_X : np.ndarray
         Fixed effects features
-    n_main_orig : int
-        Original number of main effects
 
     Returns
     -------
     np.ndarray
         Jacobian matrix
     """
-    # Split parameters into main effects and fixed effects using n_main_orig
-    # (Though par is not directly used here for splitting, ensuring signature match)
-    n_fe = fe_X.shape[1]
-    if len(par) != n_main_orig + n_fe:
-        # Add a check for parameter length consistency
-        raise ValueError(
-            f"Parameter length mismatch in Jacobian: expected {n_main_orig + n_fe}, got {len(par)}"
-        )
+    # Split parameters into main effects and fixed effects
+    n_main = X_orig.shape[1]
 
     # Original moment with fixed effects
     X_o = X_orig.copy()
@@ -525,25 +511,17 @@ def felm_dsl_Jacobian(
     d1 = np.diag(labeled_ind / sample_prob_use)
     d2 = np.diag(1 - labeled_ind / sample_prob_use)
 
-    # Compute Jacobian for main effects (use n_main_orig for shape consistency if needed)
-    # Note: The current J_main calculation depends on shapes derived from X_o and X_p
-    # Ensure these are consistent with n_main_orig if standardization added intercept
-    # J_main calculation seems robust as it uses X_o.T @ ... @ X_o
+    # Compute Jacobian for main effects
     J_main = (X_o.T @ d1 @ X_o + X_p.T @ d2 @ X_p) / len(X_orig)
-    if J_main.shape[0] != n_main_orig:
-        # Check if the calculated Jacobian size matches expected main parameters
-        # This might indicate an issue if standardization altered X_orig dimensions unexpectedly
-        # For now, we assume the shapes align based on how X_o/X_p are constructed.
-        pass  # Or add more robust handling/error reporting
 
     # Compute Jacobian for fixed effects
     J_fe = fe_X.T @ fe_X / len(X_orig)
 
-    # Combine Jacobians using n_main_orig for shapes
+    # Combine Jacobians
     J = np.block(
         [
-            [J_main, np.zeros((n_main_orig, fe_X.shape[1]))],
-            [np.zeros((fe_X.shape[1], n_main_orig)), J_fe],
+            [J_main, np.zeros((n_main, fe_X.shape[1]))],
+            [np.zeros((fe_X.shape[1], n_main)), J_fe],
         ]
     )
 

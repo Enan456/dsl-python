@@ -60,8 +60,6 @@ def dsl(
     sample_prob: np.ndarray,
     model: str = "logit",
     method: str = "linear",
-    fe_Y: Optional[np.ndarray] = None,
-    fe_X: Optional[np.ndarray] = None,
 ) -> DSLResult:
     """
     Estimate DSL model.
@@ -80,10 +78,6 @@ def dsl(
         Model type, by default "logit"
     method : str, optional
         Method for estimation, by default "linear"
-    fe_Y : np.ndarray, optional
-        Fixed effects for the outcome variable, by default None
-    fe_X : np.ndarray, optional
-        Fixed effects for the predictor variables, by default None
 
     Returns
     -------
@@ -98,9 +92,7 @@ def dsl(
         model_internal = "logit"
     elif method == "fixed_effects":
         model_internal = "felm"
-        # Check if fixed effects are provided
-        if fe_Y is None or fe_X is None:
-            raise ValueError("Fixed effects models require fe_Y and fe_X parameters")
+        # Note: FELM requires additional fe_Y, fe_X args not handled here yet
     # Keep original model name for result object
     model_name_for_result = model
 
@@ -113,38 +105,11 @@ def dsl(
         labeled_ind,
         sample_prob,
         model=model_internal,  # Use determined internal model type
-        fe_Y=fe_Y,  # Pass fixed effects for outcome
-        fe_X=fe_X,  # Pass fixed effects for predictors
     )
 
     # Note: dsl_vcov might be redundant if vcov is already computed in dsl_general
     # vcov = dsl_vcov(X, par, info["standard_errors"], model_internal)
     vcov = info["vcov"]  # Use vcov from dsl_general info dict
-
-    # Calculate predicted values and residuals
-    predicted_values = None
-    residuals = None
-
-    if model_internal == "lm":
-        # For linear models
-        predicted_values = np.dot(X, par)
-        residuals = y - predicted_values
-    elif model_internal == "logit":
-        # For logistic models
-        predicted_values = 1 / (1 + np.exp(-np.dot(X, par)))
-        residuals = y - predicted_values
-    elif model_internal == "felm":
-        # For fixed effects models
-        # Split parameters into main effects and fixed effects
-        n_main = X.shape[1]  # Number of main effect parameters
-        par_main = par[:n_main]
-        par_fe = par[n_main:]
-
-        # Compute main effects and fixed effects contributions
-        predicted_values = np.dot(X, par_main)
-        if fe_X is not None:
-            predicted_values += np.dot(fe_X, par_fe).flatten()
-        residuals = y - predicted_values
 
     # Populate and return DSLResult object
     return DSLResult(
@@ -158,8 +123,7 @@ def dsl(
         model=model_name_for_result,  # Use original model name
         labeled_size=int(np.sum(labeled_ind)),
         total_size=X.shape[0],
-        predicted_values=predicted_values,
-        residuals=residuals,
+        # predicted_values and residuals are not calculated here yet
     )
 
 
