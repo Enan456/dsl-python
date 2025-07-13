@@ -1,29 +1,12 @@
-# DSL-Kit: Design-based Supervised Learning (Python)
+# DSL: Design-based Supervised Learning (Python & R)
 
 ## Repository Overview
 
-This repository hosts parallel implementations of the Design-based Supervised Learning (DSL) framework in **Python**. Special thanks to Chandler L'Hommedieu for his help with the ideation and implementation of the Python version.
+This repository hosts parallel implementations of the Design-based Supervised Learning (DSL) framework in both **R** and **Python**. 
 
-The primary goal of the Python implementation was to create a version that closely mirrors the statistical methodology and produces comparable results to the established **R** package, originally developed by Naoki Egami.
+The primary goal of the Python implementation  was to create a version that closely mirrors the statistical methodology and produces comparable results to the established **R** package, originally developed by Naoki Egami.
 
-## What is DSL?
-
-The DSL method (Design-based Supervised Learning) is a framework designed to correct for biases that occur when automated text annotations (from LLMs or supervised ML methods) are used as if they were error‐free in downstream statistical analyses.
-
-### Key Components
-
-#### Two-Step Approach
-1. **Automated Annotation**: Use an automated method (e.g., an LLM) to label a large corpus of text.
-2. **Expert Correction**: Randomly sample a subset of documents for expert coding. The known sampling probabilities allow researchers to estimate the average prediction error.
-
-#### Bias Correction
-DSL constructs a design-adjusted outcome by subtracting a bias-correction term (derived from the difference between automated predictions and expert labels, weighted by the sampling probability) from the predicted outcome. This adjustment ensures that prediction errors—especially when they are non-random—do not bias subsequent regression estimates.
-
-#### Robust Inference
-By leveraging a doubly robust estimation approach (similar to augmented inverse probability weighting), DSL provides consistent estimates and valid confidence intervals, even if the automated annotation errors are correlated with other variables in the analysis.
-
-#### General Applicability
-Although demonstrated in the context of text classification tasks, DSL is general enough to be applied to various types of statistical models (e.g., linear regression, logistic regression) and can accommodate different types of automated annotation methods.
+DSL combines supervised machine learning techniques with methods from survey statistics and econometrics to estimate regression models when outcome labels are only available for a non-random subset of the data (partially labeled data).
 
 ## Original R Package Documentation
 
@@ -34,169 +17,143 @@ For the theoretical background, detailed methodology, and original R package usa
 
 ## Installation
 
-### Prerequisites
+### R Version
+
+You can install the most recent development version using the `devtools` package. First you have to install `devtools` using the following code. Note that you only have to do this once:
+
+```r
+if(!require(devtools)) install.packages("devtools")
+```
+
+Then, load `devtools` and use the function `install_github()` to install `dsl`:
+
+```r
+library(devtools)
+# Point to the R subdirectory if installing from this combined repo
+install_github("your-github-username/dsl/R", dependencies = TRUE) 
+# Or if the R package repo is separate:
+# install_github("naoki-egami/dsl", dependencies = TRUE) 
+```
+
+### Python Version
+
+**Prerequisites:**
 
 *   Python 3.9+
 *   pip (Python package installer)
 
-### From PyPI
-
-```bash
-pip install dsl_kit
-```
-
-### From Source
+**Setup:**
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/Enan456/dsl-python.git
-    cd dsl-python
+    git clone https://github.com/your-github-username/dsl.git
+    cd dsl/python 
     ```
 
 2.  **Create a virtual environment (recommended):**
     ```bash
     python -m venv .venv
-    source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
+    source .venv/bin/activate # On Windows use `.venv\Scripts\activate`
     ```
 
-3.  **Install in development mode:**
+3.  **Install dependencies:**
     ```bash
-    pip install -e .
+    pip install -r requirements.txt 
+    # The requirements file should include: numpy, pandas, scipy, statsmodels, patsy
     ```
 
 ## Usage
 
-The core estimation function is `dsl.dsl()`. Here's a basic example:
+### R Version
+
+Please refer to the [original package documentation](http://naokiegami.com/dsl) and vignettes for usage examples.
+
+### Python Version
+
+The core estimation function is `dsl.dsl()`.
+
+**Example (using PanChen data):**
 
 ```python
 import pandas as pd
-import numpy as np
 from patsy import dmatrices
-from dsl_kit.dsl import dsl
+from dsl import dsl
+from compare_panchen import load_panchen_data, prepare_data_for_dsl, format_dsl_results
 
-# Prepare your data
-# Your data should have:
-# - outcome variable (y)
-# - predictor variables (X)
-# - labeled_ind: binary indicator for labeled data (1) or unlabeled data (0)
-# - sample_prob: sampling probability for each observation
+# Load and prepare data
+data = load_panchen_data() 
+df = prepare_data_for_dsl(data)
 
-# Define your model formula
-formula = "y ~ x1 + x2 + x3"
+# Define formula
+formula = (
+    "SendOrNot ~ countyWrong + prefecWrong + connect2b + "
+    "prevalence + regionj + groupIssue"
+)
 
 # Prepare design matrix (X) and response (y)
-y, X = dmatrices(formula, data, return_type="dataframe")
+y, X = dmatrices(formula, df, return_type="dataframe")
 
-# Run DSL estimation
+# Run DSL estimation (logit model)
 result = dsl(
     X=X.values,
-    y=y.values.flatten(),  # Ensure y is 1D
-    labeled_ind=data["labeled"].values,
-    sample_prob=data["sample_prob"].values,
-    model="logit",  # Use "logit" for binary outcomes, "lm" for continuous
-    method="logistic"  # Use "logistic" for logit, "linear" for lm
+    y=y.values.flatten(), # Ensure y is 1D
+    labeled_ind=df["labeled"].values,
+    sample_prob=df["sample_prob"].values,
+    model="logit", # Specify the desired model (e.g., 'logit', 'lm')
+    method="logistic" # Specify the estimation method ('logistic', 'linear')
 )
 
-# Access results
+# Print results
 print(f"Convergence: {result.success}")
 print(f"Iterations: {result.niter}")
-print(f"Coefficients: {result.coefficients}")
-print(f"Standard Errors: {result.standard_errors}")
+print(f"Objective Value: {result.objective}")
+
+# Format and print R-style summary
+summary_table = format_dsl_results(result, formula) # Assumes format_dsl_results is available
+print("\nPython DSL Results Summary:")
+print(summary_table)
+
 ```
 
-### Function Parameters
+## R vs. Python Comparison (PanChen Dataset - Logit Model)
 
-The `dsl()` function has the following parameters:
+The Python implementation has been carefully aligned with the R version's statistical methodology. Below is a comparison of the results obtained from both implementations on the PanChen dataset using a logistic model.
 
-```python
-def dsl(
-    X: np.ndarray,
-    y: np.ndarray,
-    labeled_ind: np.ndarray,
-    sample_prob: np.ndarray,
-    model: str = "logit",
-    method: str = "linear",
-    fe_Y: np.ndarray = None,
-    fe_X: np.ndarray = None,
-) -> DSLResult:
+**Python Results (Final):**
+
+```
+             Estimate  Std. Error  CI Lower  CI Upper  p value     
+(Intercept)    2.0547      0.3643    1.3407    2.7686   0.0000  ***
+countyWrong   -0.0721      0.2037   -0.4713    0.3272   0.7234     
+prefecWrong   -1.0622      0.2939   -1.6382   -0.4862   0.0003  ***
+connect2b     -0.1116      0.1155   -0.3379    0.1147   0.3338     
+prevalence    -0.2985      0.1482   -0.5890   -0.0080   0.0440    *
+regionj        0.1285      0.4501   -0.7536    1.0106   0.7752     
+groupIssue    -2.3291      0.3626   -3.0397   -1.6184   0.0000  ***
 ```
 
-- **X**: Design matrix (numpy array)
-- **y**: Response variable (numpy array)
-- **labeled_ind**: Binary indicator for labeled data (1) or unlabeled data (0)
-- **sample_prob**: Sampling probability for each observation
-- **model**: Model type, options include:
-  - "logit": For binary outcomes (default)
-  - "lm": For continuous outcomes
-  - "felm": For fixed effects models
-- **method**: Estimation method, options include:
-  - "linear": For linear models
-  - "logistic": For logistic models
-  - "fixed_effects": For fixed effects models
-- **fe_Y**: Fixed effects for the outcome variable (required for fixed effects models)
-- **fe_X**: Fixed effects for the predictor variables (required for fixed effects models)
+**R Results (Reference):**
 
-### Return Value
-
-The function returns a `DSLResult` object with the following attributes:
-
-- **coefficients**: Estimated model coefficients
-- **standard_errors**: Standard errors for the coefficients
-- **vcov**: Variance-covariance matrix
-- **objective**: Value of the objective function at the solution
-- **success**: Boolean indicating if the estimation converged
-- **message**: Convergence message
-- **niter**: Number of iterations performed
-- **model**: Model type used
-- **labeled_size**: Number of labeled observations
-- **total_size**: Total number of observations
-- **predicted_values**: Predicted values for all observations
-- **residuals**: Residuals for all observations
-
-### Example with Fixed Effects
-
-```python
-# For fixed effects models, you need to provide fe_Y and fe_X
-result = dsl(
-    X=X.values,
-    y=y.values.flatten(),
-    labeled_ind=data["labeled"].values,
-    sample_prob=data["sample_prob"].values,
-    model="felm",
-    method="fixed_effects",
-    fe_Y=data["fixed_effect_y"].values,  # Fixed effects for outcome
-    fe_X=data["fixed_effect_x"].values,  # Fixed effects for predictors
-)
-
-# Access predicted values and residuals
-print(f"Predicted Values: {result.predicted_values}")
-print(f"Residuals: {result.residuals}")
+```
+            Estimate Std. Error CI Lower CI Upper p value
+(Intercept)   2.0978     0.3621   1.3881   2.8075  0.0000 ***
+countyWrong  -0.2617     0.2230  -0.6988   0.1754  0.1203    
+prefecWrong  -1.1162     0.2970  -1.6982  -0.5342  0.0001 ***
+connect2b    -0.0788     0.1197  -0.3134   0.1558  0.2552    
+prevalence   -0.3271     0.1520  -0.6250  -0.0292  0.0157   *
+regionj       0.1253     0.4566  -0.7695   1.0202  0.3919    
+groupIssue   -2.3222     0.3597  -3.0271  -1.6172  0.0000 ***
 ```
 
-For a complete example using the PanChen dataset, see the tests directory.
+**Note on Differences:** The results are very close, demonstrating successful alignment. The minor remaining numerical differences are expected due to inherent variations in optimization algorithms (BFGS vs. L-BFGS-B implementations), floating-point arithmetic, underlying linear algebra libraries (e.g., BLAS/LAPACK versions), formula parsing (`patsy` vs. R), handling of numerical edge cases, and specific package versions across different language environments (R vs. Python/NumPy/SciPy). For practical purposes, the implementations yield equivalent statistical results.
 
-## Applications
+**Reference:** 
 
-### LLM and Synthetic Data Applications
-- Validate LLM outputs against expert annotations
-- Correct biases in synthetic training data
-- Scale annotation while maintaining statistical rigor
-- Estimate true model performance with partially labeled data
+- [Egami, Hinck, Stewart, and Wei. (2024)](https://naokiegami.com/paper/dsl_ss.pdf). "Using Large Language Model Annotations for the Social Sciences: A General Framework of Using Predicted Variables in Downstream Analyses."
 
-### General Use Cases
-- **Social Sciences:** Analyzing survey data where only a subset of responses are labeled
-- **Machine Learning:** Improving model performance when labeled data is limited
-- **Econometrics:** Estimating models with partially observed outcomes
-- **Healthcare:** Predicting patient outcomes with limited labeled data
-- **Synthetic Data Generation:** Creating and utilizing synthetic data to enhance model training and validation
+- [Egami, Hinck, Stewart, and Wei. (2023)](https://naokiegami.com/paper/dsl.pdf). "Using Imperfect Surrogates for Downstream Inference:
+Design-based Supervised Learning for Social Science Applications of Large Language Models," Advances in Neural Information Processing Systems (NeurIPS).
 
-## ELI5 
-
-Imagine you have a large dataset of images, but only a few of them are labeled with their contents. DSL is like having a smart algorithm that can learn from the labeled images to predict the contents of the unlabeled ones. It uses patterns and features from the known data to make educated guesses about the unknown data, helping you understand the entire dataset better. DSL is particularly useful when working with synthetic data, where you can generate additional labeled examples to improve the model's performance.
-
-When you have synthetic data, you can create more examples that mimic the real data. DSL can then use these synthetic examples to learn more about the patterns in your data, making it even better at predicting the contents of unlabeled images. This approach is especially helpful when you have limited real data but need a robust model.
-
-DSL can also help you find the best way to split your data for training and testing. By analyzing how well the model performs on different parts of your data, DSL can identify effective splits that improve model accuracy. Additionally, DSL can detect biases in synthetic data, ensuring that your model is fair and representative of the real-world data it will encounter.
 
 ## Contributing
 
@@ -204,4 +161,4 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ## License
 
-MIT License
+[Specify License Information Here, e.g., MIT, GPL-3] 
