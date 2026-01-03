@@ -78,11 +78,12 @@ def prepare_data_for_dsl(data):
     logger.info(f"Labeled: {labeled_count}, Unlabeled: {unlabeled_count}")
 
     # Create sample probability (equal probability for labeled observations)
-    # In R, this is calculated as n_labeled / n_total for complete cases
-    n_complete = len(complete_cases)
-    sample_prob = n_labeled / n_complete
+    # The sample probability should be n_labeled / n_total (total dataset size)
+    # This represents the probability that a unit in the population is sampled
+    n_total = len(df)
+    sample_prob = n_labeled / n_total
     df["sample_prob"] = sample_prob
-    logger.info(f"Sample probability: {sample_prob}")
+    logger.info(f"Sample probability: {sample_prob} (n_labeled={n_labeled}, n_total={n_total})")
 
     # Handle missing values in predictors
     # For unlabeled data, we'll fill NAs with 0 as before
@@ -284,14 +285,39 @@ def main():
         # Prepare X and y using patsy
         y, X = dmatrices(formula, df, return_type="dataframe")
 
-        # Run DSL estimation using the new interface
-        result = dsl(
-            X=X.values,
-            y=y.values,
+        # Create X_pred by replacing countyWrong with pred_countyWrong
+        df_pred = df.copy()
+        df_pred["countyWrong"] = df_pred["pred_countyWrong"]
+        _, X_pred = dmatrices(formula, df_pred, return_type="dataframe")
+
+        logger.info("Using predictions: X_pred has pred_countyWrong instead of countyWrong")
+
+        # Run DSL estimation using dsl_general directly to pass predictions
+        from dsl.helpers.dsl_general import dsl_general
+
+        par, info = dsl_general(
+            Y_orig=y.values.flatten(),
+            X_orig=X.values,
+            Y_pred=y.values.flatten(),
+            X_pred=X_pred.values,
             labeled_ind=df["labeled"].values,
-            sample_prob=df["sample_prob"].values,
+            sample_prob_use=df["sample_prob"].values,
             model="logit",
-            method="logistic",
+        )
+
+        # Create DSLResult manually
+        from dsl import DSLResult
+        result = DSLResult(
+            coefficients=par,
+            standard_errors=info["standard_errors"],
+            vcov=info["vcov"],
+            objective=info["objective"],
+            success=info["convergence"],
+            message=info["message"],
+            niter=info["iterations"],
+            model="logit",
+            labeled_size=int(np.sum(df["labeled"].values)),
+            total_size=len(df),
         )
 
         logger.info("DSL estimation completed successfully")
