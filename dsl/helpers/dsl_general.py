@@ -112,9 +112,10 @@ def dsl_general(
             sd_X[j] = np.std(X_pred[:, j])
 
     # Initialize parameters using statsmodels for better starting point
+    # CRITICAL: Must initialize on STANDARDIZED data (X_orig_use) to match optimization scale
     if model == "logit":
-        # Use statsmodels for initialization
-        X_labeled = X_orig[labeled_ind == 1]
+        # Use statsmodels for initialization on STANDARDIZED data
+        X_labeled = X_orig_use[labeled_ind == 1]
         y_labeled = Y_orig[labeled_ind == 1]
         model_sm = sm.Logit(y_labeled, X_labeled)
         try:
@@ -126,11 +127,8 @@ def dsl_general(
     else:
         par_init = np.zeros(X_orig.shape[1])
 
-    # Add parameter scaling for numerical stability
-    scale_factor = np.max(np.abs(par_init))
-    if scale_factor > 0:
-        par_init = par_init / scale_factor
-        logger.info(f"Initial parameters scaled by factor: {scale_factor}")
+    # Remove extra parameter scaling - only use data standardization
+    # (Parameter rescaling was causing double-scaling with standardized data)
 
     # Define objective and gradient functions
     def objective(par):
@@ -269,12 +267,7 @@ def dsl_general(
         logger.error(f"Optimization error: {str(e)}")
         raise
 
-    # Rescale parameters back
-    if scale_factor > 0:
-        result.x = result.x * scale_factor
-        logger.info("Parameters rescaled back to original scale")
-
-    # Get final parameters
+    # Get final parameters (no rescaling needed - removed double-scaling)
     par_opt_scaled = result.x
 
     # Compute sandwich variance estimator
