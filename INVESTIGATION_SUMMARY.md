@@ -67,5 +67,21 @@ Python DSL implementation produces coefficients that don't match R implementatio
 4. Clean up debug scripts
 5. Document the solution
 
+## Additional Finding: README Results Discrepancy
+
+The README.md shows Python results (prefecWrong = -1.0622) that have been present since the earliest git commit, but running the actual Python code at any point in the repository history consistently produces prefecWrong = -2.3757 (or -2.4626 with current fixes).
+
+**Evidence:**
+- Commit 52958c5 (earliest): Code produces -2.3757, README shows -1.0622
+- Commit 22bf4dc (pre-fix): Code produces -2.3757, README shows -1.0622
+- Current commit (with fixes): Code produces -2.4626, README shows -1.0622
+
+**Implications:**
+1. README results may have been copied from another source or generated with external configuration
+2. The Python implementation has never actually produced the results shown in README
+3. README should be updated to reflect actual Python output or document the special configuration used
+
 ## Key Learning
 When comparing statistical implementations across languages, **exact replication requires matching the random number generator**, not just the seed value. Different RNGs produce different samples even with the same seed.
+
+Additionally, **documentation should be generated from actual code execution**, not copied from other sources, to ensure accuracy and reproducibility.
