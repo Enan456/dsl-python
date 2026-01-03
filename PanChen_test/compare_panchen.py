@@ -86,17 +86,31 @@ def prepare_data_for_dsl(data):
     logger.info(f"Sample probability: {sample_prob} (n_labeled={n_labeled}, n_total={n_total})")
 
     # Handle missing values in predictors
-    # For unlabeled data, we'll fill NAs with 0 as before
+    # For unlabeled data, we need special handling:
+    # - countyWrong: use pred_countyWrong (the prediction) to match X_pred distribution
+    # - Other variables: fill with 0 (they don't have predictions)
     # For labeled data, we already ensured complete cases
+
+    # Special handling for countyWrong - use prediction for unlabeled
+    mask = df["labeled"] == 0
+    na_count = df.loc[mask, "countyWrong"].isna().sum()
+    if na_count > 0:
+        logger.info(
+            f"Filling {na_count} NA values in 'countyWrong' for unlabeled data "
+            f"with pred_countyWrong (to match X_pred distribution)"
+        )
+        df.loc[mask, "countyWrong"] = df.loc[mask, "countyWrong"].fillna(
+            df.loc[mask, "pred_countyWrong"]
+        )
+
+    # Fill other variables with 0 for unlabeled data
     for col in [
-        "countyWrong",
         "prefecWrong",
         "connect2b",
         "prevalence",
         "regionj",
         "groupIssue",
     ]:
-        # Only fill NAs in unlabeled data
         mask = df["labeled"] == 0
         na_count = df.loc[mask, col].isna().sum()
         if na_count > 0:
