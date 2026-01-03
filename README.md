@@ -115,6 +115,40 @@ print(summary_table)
 
 ```
 
+## Testing and Validation
+
+### Automated Python-R Comparison Tests
+
+This repository includes a comprehensive automated testing framework to validate the Python implementation against the R reference implementation.
+
+**Key Features:**
+- Automated coefficient, standard error, and p-value comparison with configurable tolerances
+- Visual comparison reports with plots and charts
+- Pytest-based test suite for continuous validation
+- CI/CD integration via GitHub Actions
+
+**Quick Start:**
+
+```bash
+# Run comparison tests
+pytest tests/test_python_r_comparison.py -v
+
+# Generate detailed comparison report
+python scripts/run_comparison.py --report-dir reports
+```
+
+**Documentation:**
+- [Complete Testing Framework Documentation](docs/python_r_comparison_testing.md)
+- Test suite: `tests/test_python_r_comparison.py`
+- Comparison framework: `tests/comparison/`
+
+**CI Status:**
+- Automated tests run on every push and pull request
+- Nightly validation runs to catch regressions
+- Python versions tested: 3.9, 3.10, 3.11
+
+See [docs/python_r_comparison_testing.md](docs/python_r_comparison_testing.md) for detailed documentation on the testing infrastructure, tolerance configuration, and adding new test fixtures.
+
 ## R vs. Python Comparison (PanChen Dataset - Logit Model)
 
 The Python implementation has been carefully aligned with the R version's statistical methodology. Below is a comparison of the results obtained from both implementations on the PanChen dataset using a logistic model.
