@@ -119,13 +119,17 @@ print(summary_table)
 
 ### Automated Python-R Comparison Tests
 
-This repository includes a comprehensive automated testing framework to validate the Python implementation against the R reference implementation.
+This repository includes a comprehensive automated testing framework to validate the Python implementation against the R reference implementation, with continuous monitoring and metrics tracking.
 
 **Key Features:**
 - Automated coefficient, standard error, and p-value comparison with configurable tolerances
 - Visual comparison reports with plots and charts
 - Pytest-based test suite for continuous validation
 - CI/CD integration via GitHub Actions
+- **Metrics tracking dashboard** with historical trends
+- **Automated alerting** for comparison failures
+- **Performance benchmarking** suite
+- **Synthetic test datasets** for controlled validation
 
 **Quick Start:**
 
@@ -135,17 +139,34 @@ pytest tests/test_python_r_comparison.py -v
 
 # Generate detailed comparison report
 python scripts/run_comparison.py --report-dir reports
+
+# Run performance benchmarks
+python tests/benchmark_performance.py --benchmark-type all
+
+# Generate synthetic test dataset
+python tests/data/synthetic_dataset.py --n-total 1000 --n-labeled 500 --output synthetic.parquet
 ```
 
 **Documentation:**
 - [Complete Testing Framework Documentation](docs/python_r_comparison_testing.md)
 - Test suite: `tests/test_python_r_comparison.py`
 - Comparison framework: `tests/comparison/`
+- Benchmarking: `tests/benchmark_performance.py`
+- Synthetic data: `tests/data/synthetic_dataset.py`
 
-**CI Status:**
+**CI/CD Status:**
 - Automated tests run on every push and pull request
 - Nightly validation runs to catch regressions
 - Python versions tested: 3.9, 3.10, 3.11
+- Metrics dashboard generated for each run
+- Historical metrics tracked in `.metrics-history/`
+
+**Monitoring & Metrics:**
+- Real-time comparison status badges
+- Historical pass rate tracking
+- Per-Python-version metrics breakdowns
+- Automated GitHub Actions summaries
+- Dashboard: Check workflow artifacts for `comparison-dashboard`
 
 See [docs/python_r_comparison_testing.md](docs/python_r_comparison_testing.md) for detailed documentation on the testing infrastructure, tolerance configuration, and adding new test fixtures.
 

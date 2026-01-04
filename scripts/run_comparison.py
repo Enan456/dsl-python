@@ -11,7 +11,9 @@ Usage:
 import argparse
 import sys
 import logging
+import json
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 from scipy import stats
@@ -39,13 +41,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_comparison(strict: bool = False, report_dir: str = "reports", show_all: bool = False):
+def run_comparison(strict: bool = False, report_dir: str = "reports", show_all: bool = False, save_metrics: str = None):
     """Run Python-R comparison with report generation.
 
     Args:
         strict: If True, use strict tolerances
         report_dir: Directory for output reports
         show_all: If True, show all comparisons in report (not just failures)
+        save_metrics: Path to save metrics JSON file
 
     Returns:
         ComparisonResult object
@@ -141,6 +144,58 @@ def run_comparison(strict: bool = False, report_dir: str = "reports", show_all: 
     print(f"\nDetailed report generated: {report_path}")
     print(f"Open in browser: file://{Path(report_path).absolute()}\n")
 
+    # Save metrics if requested
+    if save_metrics:
+        logger.info(f"Saving metrics to {save_metrics}")
+        metrics_data = {
+            "timestamp": datetime.now().isoformat(),
+            "dataset": "panchen",
+            "strict_mode": strict,
+            "n_comparisons": comparison.n_comparisons,
+            "n_passed": comparison.n_passed,
+            "n_failed": comparison.n_failed,
+            "pass_rate": comparison.n_passed / comparison.n_comparisons if comparison.n_comparisons > 0 else 0,
+            "config": {
+                "coef_abs_tol": comparison.config.coef_abs_tol,
+                "coef_rel_tol": comparison.config.coef_rel_tol,
+                "se_abs_tol": comparison.config.se_abs_tol,
+                "se_rel_tol": comparison.config.se_rel_tol,
+                "pvalue_abs_tol": comparison.config.pvalue_abs_tol,
+            },
+            "by_metric": {
+                "coefficients": {
+                    "total": len(comparison.coefficient_comparisons),
+                    "passed": sum(1 for c in comparison.coefficient_comparisons if c.passed),
+                    "failed": sum(1 for c in comparison.coefficient_comparisons if not c.passed),
+                },
+                "standard_errors": {
+                    "total": len(comparison.se_comparisons),
+                    "passed": sum(1 for c in comparison.se_comparisons if c.passed),
+                    "failed": sum(1 for c in comparison.se_comparisons if not c.passed),
+                },
+                "pvalues": {
+                    "total": len(comparison.pvalue_comparisons),
+                    "passed": sum(1 for c in comparison.pvalue_comparisons if c.passed),
+                    "failed": sum(1 for c in comparison.pvalue_comparisons if not c.passed),
+                },
+            },
+            "failures": [
+                {
+                    "metric": failure.name,
+                    "variable": failure.variable,
+                    "python_value": failure.python_value,
+                    "r_value": failure.r_value,
+                    "abs_diff": failure.abs_diff,
+                    "rel_diff": failure.rel_diff,
+                }
+                for failure in comparison.get_failures()
+            ],
+        }
+
+        with open(save_metrics, "w") as f:
+            json.dump(metrics_data, f, indent=2)
+        logger.info(f"Metrics saved to {save_metrics}")
+
     # Return comparison result for further analysis
     return comparison
 
@@ -177,6 +232,13 @@ def main():
         help="Exit with error if any comparison fails",
     )
 
+    parser.add_argument(
+        "--save-metrics",
+        type=str,
+        default=None,
+        help="Path to save metrics JSON file",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -184,6 +246,7 @@ def main():
             strict=args.strict,
             report_dir=args.report_dir,
             show_all=args.show_all,
+            save_metrics=args.save_metrics,
         )
 
         # Exit with error if comparison failed and --fail-on-mismatch is set
