@@ -62,6 +62,25 @@ install_github("your-github-username/dsl/R", dependencies = TRUE)
     # The requirements file should include: numpy, pandas, scipy, statsmodels, patsy
     ```
 
+## API Reference
+
+### Quick Reference
+
+**Core Functions:**
+- `dsl(X, y, labeled_ind, sample_prob, model="logit")` - Simple DSL estimation wrapper
+- `dsl_general(Y_orig, X_orig, Y_pred, X_pred, labeled_ind, sample_prob_use, model="lm")` - Full DSL with prediction support
+
+**Important**: For doubly robust estimation with predictions, use `dsl_general()` directly. The `dsl()` wrapper currently does not support separate prediction data.
+
+**Result Classes:**
+- `DSLResult` - Contains coefficients, standard errors, convergence info
+- `PowerDSLResult` - Contains power analysis results
+
+**Power Analysis:**
+- `power_dsl(formula, data, ...)` - Statistical power analysis
+
+**📖 Complete API Documentation**: See [docs/API.md](docs/API.md) for detailed parameter descriptions, return values, and usage examples.
+
 ## Usage
 
 ### R Version
@@ -70,7 +89,9 @@ Please refer to the [original package documentation](http://naokiegami.com/dsl) 
 
 ### Python Version
 
-The core estimation function is `dsl.dsl()`.
+#### Basic Example
+
+The simple wrapper function `dsl.dsl()` provides basic DSL estimation:
 
 **Example (using PanChen data):**
 
@@ -115,60 +136,44 @@ print(summary_table)
 
 ```
 
-## Testing and Validation
+#### Advanced Example: With Predictions (Doubly Robust)
 
-### Automated Python-R Comparison Tests
+For full doubly robust estimation with separate prediction data, use `dsl_general()`:
 
-This repository includes a comprehensive automated testing framework to validate the Python implementation against the R reference implementation, with continuous monitoring and metrics tracking.
+```python
+from dsl.helpers.dsl_general import dsl_general
+from dsl import DSLResult
 
-**Key Features:**
-- Automated coefficient, standard error, and p-value comparison with configurable tolerances
-- Visual comparison reports with plots and charts
-- Pytest-based test suite for continuous validation
-- CI/CD integration via GitHub Actions
-- **Metrics tracking dashboard** with historical trends
-- **Automated alerting** for comparison failures
-- **Performance benchmarking** suite
-- **Synthetic test datasets** for controlled validation
+# Scenario: Some variables have missing values but we have predictions
+formula = "SendOrNot ~ countyWrong + prefecWrong + connect2b"
 
-**Quick Start:**
+# Original data (with missing values)
+y, X = dmatrices(formula, df, return_type="dataframe")
 
-```bash
-# Run comparison tests
-pytest tests/test_python_r_comparison.py -v
+# Prediction data (fill missing with predicted values)
+df_pred = df.copy()
+df_pred["countyWrong"] = df_pred["countyWrong"].fillna(df_pred["pred_countyWrong"])
+_, X_pred = dmatrices(formula, df_pred, return_type="dataframe")
 
-# Generate detailed comparison report
-python scripts/run_comparison.py --report-dir reports
+# Run DSL with doubly robust estimation
+par, info = dsl_general(
+    Y_orig=y.values.flatten(),
+    X_orig=X.values,
+    Y_pred=y.values.flatten(),
+    X_pred=X_pred.values,  # Uses predictions for missing values
+    labeled_ind=df["labeled"].values,
+    sample_prob_use=df["sample_prob"].values,
+    model="logit"
+)
 
-# Run performance benchmarks
-python tests/benchmark_performance.py --benchmark-type all
-
-# Generate synthetic test dataset
-python tests/data/synthetic_dataset.py --n-total 1000 --n-labeled 500 --output synthetic.parquet
+# Check convergence
+print(f"Converged: {info['convergence']}")
+print(f"Objective: {info['objective']}")  # Should be ≈ 0
+print(f"Coefficients: {par}")
+print(f"Standard Errors: {info['standard_errors']}")
 ```
 
-**Documentation:**
-- [Complete Testing Framework Documentation](docs/python_r_comparison_testing.md)
-- Test suite: `tests/test_python_r_comparison.py`
-- Comparison framework: `tests/comparison/`
-- Benchmarking: `tests/benchmark_performance.py`
-- Synthetic data: `tests/data/synthetic_dataset.py`
-
-**CI/CD Status:**
-- Automated tests run on every push and pull request
-- Nightly validation runs to catch regressions
-- Python versions tested: 3.9, 3.10, 3.11
-- Metrics dashboard generated for each run
-- Historical metrics tracked in `.metrics-history/`
-
-**Monitoring & Metrics:**
-- Real-time comparison status badges
-- Historical pass rate tracking
-- Per-Python-version metrics breakdowns
-- Automated GitHub Actions summaries
-- Dashboard: Check workflow artifacts for `comparison-dashboard`
-
-See [docs/python_r_comparison_testing.md](docs/python_r_comparison_testing.md) for detailed documentation on the testing infrastructure, tolerance configuration, and adding new test fixtures.
+**See [docs/API.md](docs/API.md) for complete documentation and more examples.**
 
 ## R vs. Python Comparison (PanChen Dataset - Logit Model)
 
