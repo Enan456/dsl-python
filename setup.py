@@ -15,8 +15,8 @@ setup(
     author="Your Name",
     author_email="your.email@example.com",
     description="Double-Supervised Learning (DSL) Framework",
-    long_description=open("README.txt").read(),
-    long_description_content_type="text/plain",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
     url="https://github.com/yourusername/dsl",
     classifiers=[
         "Development Status :: 3 - Alpha",
