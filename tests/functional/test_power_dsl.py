@@ -2,32 +2,28 @@
 Functional tests for the power_dsl function
 """
 
+import numpy as np
+from patsy import dmatrices
+
 from dsl.dsl import dsl, power_dsl
 
 
 def test_power_dsl_with_dsl_output(sample_data, sample_prediction):
     """Test power_dsl with dsl output"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
-
     # Extract labeled indicator
     labeled_ind = sample_data["labeled"].values
 
+    # Create design matrices from formula
+    y_mat, X_mat = dmatrices("y ~ x1 + x2 + x3 + x4 + x5", sample_data, return_type="dataframe")
+
     # Run DSL
     dsl_result = dsl(
-        model="lm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data,
+        X=X_mat.values,
+        y=y_mat.values.flatten(),
         labeled_ind=labeled_ind,
         sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        model="lm",
+        method="linear",
     )
 
     # Run power_dsl
