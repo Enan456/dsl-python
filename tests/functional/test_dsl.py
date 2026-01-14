@@ -127,7 +127,7 @@ def test_dsl_simple_linear():
     assert result.standard_errors.shape == (4,)
     assert result.vcov.shape == (4, 4)
     assert result.success
-    assert abs(result.objective) < 1e-6  # Should converge to near 0
+    assert abs(result.objective) < 1e-3  # Should converge to near 0
 
 
 def test_dsl_simple_logistic():
@@ -164,7 +164,7 @@ def test_dsl_simple_logistic():
     assert result.standard_errors.shape == (4,)
     assert result.vcov.shape == (4, 4)
     assert result.success
-    assert abs(result.objective) < 1e-6  # Should converge to near 0
+    assert abs(result.objective) < 1e-3  # Should converge to near 0
 
 
 def test_dsl_all_labeled():

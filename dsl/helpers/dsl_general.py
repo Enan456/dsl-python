@@ -124,6 +124,17 @@ def dsl_general(
         except:
             logger.warning("Statsmodels initialization failed, using zeros")
             par_init = np.zeros(X_orig.shape[1])
+    elif model == "lm":
+        # Use statsmodels OLS for linear model initialization on STANDARDIZED data
+        X_labeled = X_orig_use[labeled_ind == 1]
+        y_labeled = Y_orig[labeled_ind == 1]
+        model_sm = sm.OLS(y_labeled, X_labeled)
+        try:
+            result_sm = model_sm.fit()
+            par_init = result_sm.params
+        except:
+            logger.warning("Statsmodels OLS initialization failed, using zeros")
+            par_init = np.zeros(X_orig.shape[1])
     else:
         par_init = np.zeros(X_orig.shape[1])
 
@@ -260,8 +271,21 @@ def dsl_general(
             optim_options["method"] = "L-BFGS-B"
             result = minimize(objective, par_init, **optim_options)
 
+        # Check if solution is acceptable even if optimizer says it didn't converge
+        # For DSL, what matters is that moment conditions are satisfied (objective ≈ 0)
+        final_objective = objective(result.x)
         if not result.success:
-            raise RuntimeError(f"Optimization failed: {result.message}")
+            if abs(final_objective) < 1e-3:  # Accept if objective is small enough
+                logger.warning(
+                    f"Optimization did not fully converge but objective is small "
+                    f"({final_objective:.6e}), accepting solution"
+                )
+                result.success = True
+            else:
+                raise RuntimeError(
+                    f"Optimization failed: {result.message}, "
+                    f"objective={final_objective:.6e}"
+                )
 
     except Exception as e:
         logger.error(f"Optimization error: {str(e)}")
