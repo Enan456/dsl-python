@@ -17,7 +17,7 @@ jobs:
         python-version: ["3.9", "3.10", "3.11"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -73,7 +73,7 @@ jobs:
 
     - name: Upload comparison report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: comparison-report-py${{ matrix.python-version }}
         path: |
@@ -82,14 +82,14 @@ jobs:
 
     - name: Upload detailed report
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: detailed-report-py${{ matrix.python-version }}
         path: reports/
 
     - name: Upload metrics
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: metrics-py${{ matrix.python-version }}
         path: |
@@ -108,7 +108,7 @@ jobs:
     if: always()
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -120,7 +120,7 @@ jobs:
         pip install matplotlib pandas numpy
 
     - name: Download all metrics
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: all-metrics/
 
@@ -133,7 +133,7 @@ jobs:
 
     - name: Upload dashboard
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: comparison-dashboard
         path: dashboard/
