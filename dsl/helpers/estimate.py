@@ -137,7 +137,7 @@ def estimate_fixed_effects(
     X : np.ndarray
         Feature matrix
     fe : np.ndarray
-        Fixed effects variable
+        Fixed effects variable (can be 1D or 2D)
     method : str, optional
         Supervised learning method, by default "linear"
     **kwargs : dict
@@ -153,12 +153,19 @@ def estimate_fixed_effects(
     X_demeaned = X.copy()
     fe_pred = np.zeros_like(y)
 
+    # Ensure fe is 2D for consistent processing
+    if fe.ndim == 1:
+        fe_2d = fe.reshape(-1, 1)
+    else:
+        fe_2d = fe
+
     # Get unique fixed effects
-    unique_fe = np.unique(fe, axis=0)
+    unique_fe = np.unique(fe_2d, axis=0)
 
     # Demean within each fixed effect group
     for fe_val in unique_fe:
-        mask = (fe == fe_val).all(axis=1)
+        # Compare each row of fe_2d with fe_val
+        mask = (fe_2d == fe_val).all(axis=1)
         y_mean = np.mean(y[mask])
         X_mean = np.mean(X[mask], axis=0)
         y_demeaned[mask] = y[mask] - y_mean
@@ -226,16 +233,24 @@ def estimate_power(
     }
 
 
-def available_method() -> List[str]:
+def available_method(print_out: bool = True) -> List[str]:
     """
     Get available supervised learning methods.
+
+    Parameters
+    ----------
+    print_out : bool, optional
+        Whether to print the methods, by default True
 
     Returns
     -------
     List[str]
         List of available methods
     """
-    return ["linear", "logistic", "random_forest"]
+    methods = ["linear", "logistic", "random_forest"]
+    if print_out:
+        print("Available methods:", methods)
+    return methods
 
 
 def fit_model(

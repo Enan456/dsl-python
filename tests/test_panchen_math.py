@@ -13,7 +13,7 @@ import numpy as np
 from patsy import dmatrices, dmatrix
 
 # Removed unused pandas and stats imports
-from tests.data.compare_panchen import load_panchen_data, prepare_data_for_dsl
+from PanChen_test.compare_panchen import load_panchen_data, prepare_data_for_dsl
 
 # DSL imports
 from dsl import DSLResult, dsl

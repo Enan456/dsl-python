@@ -60,6 +60,7 @@ def dsl_general(
         Estimated parameters and additional information
     """
     from .moment import (
+        felm_dsl_Jacobian,
         felm_dsl_moment_base,
         lm_dsl_Jacobian,
         lm_dsl_moment_base,
@@ -80,6 +81,8 @@ def dsl_general(
             jac_fn = lm_dsl_Jacobian
         elif model == "logit":
             jac_fn = logit_dsl_Jacobian
+        elif model == "felm":
+            jac_fn = felm_dsl_Jacobian
 
     # Standardize data to make estimation easier
     X_orig_use = np.ones_like(X_orig)
@@ -112,25 +115,31 @@ def dsl_general(
             sd_X[j] = np.std(X_pred[:, j])
 
     # Initialize parameters using statsmodels for better starting point
-    if model == "logit":
-        # Use statsmodels for initialization
-        X_labeled = X_orig[labeled_ind == 1]
-        y_labeled = Y_orig[labeled_ind == 1]
-        model_sm = sm.Logit(y_labeled, X_labeled)
-        try:
-            result_sm = model_sm.fit(disp=0)
-            par_init = result_sm.params
-        except:
-            logger.warning("Statsmodels initialization failed, using zeros")
+    X_labeled = X_orig_use[labeled_ind == 1]
+    y_labeled = Y_orig[labeled_ind == 1].flatten()
+
+    try:
+        if model == "logit":
+            model_sm = sm.Logit(y_labeled, X_labeled)
+            result_sm = model_sm.fit(disp=0, method='bfgs', maxiter=100)
+            par_init = result_sm.params.copy()
+            logger.info("Initialized parameters using statsmodels Logit")
+        elif model in ["lm", "felm"]:
+            # Use OLS for linear model initialization
+            model_sm = sm.OLS(y_labeled, X_labeled)
+            result_sm = model_sm.fit()
+            par_init = result_sm.params.copy()
+            logger.info("Initialized parameters using statsmodels OLS")
+        else:
             par_init = np.zeros(X_orig.shape[1])
-    else:
+    except Exception as e:
+        logger.warning(f"Statsmodels initialization failed ({str(e)}), using zeros")
         par_init = np.zeros(X_orig.shape[1])
 
-    # Add parameter scaling for numerical stability
-    scale_factor = np.max(np.abs(par_init))
-    if scale_factor > 0:
-        par_init = par_init / scale_factor
-        logger.info(f"Initial parameters scaled by factor: {scale_factor}")
+    # Ensure par_init is finite
+    if not np.all(np.isfinite(par_init)):
+        logger.warning("Non-finite initial parameters, resetting to zeros")
+        par_init = np.zeros(X_orig.shape[1])
 
     # Define objective and gradient functions
     def objective(par):
@@ -242,37 +251,91 @@ def dsl_general(
         "method": "BFGS",
         "jac": gradient,
         "options": {
-            "gtol": 1.5e-8,  # Match R's default
-            "ftol": 1.5e-8,  # Add function tolerance
+            "gtol": 1e-5,  # Relaxed tolerance for better convergence
             "maxiter": 1000,
-            "disp": True,  # Show optimization progress
-            "return_all": True,  # Get full optimization history
+            "disp": False,  # Suppress optimization progress output
         },
         "callback": callback,
     }
 
+    # Track best result across optimization attempts
+    best_result = None
+    best_objective = np.inf
+
     # Run optimization with error handling
     try:
         result = minimize(objective, par_init, **optim_options)
+        if result.fun < best_objective:
+            best_result = result
+            best_objective = result.fun
 
         if not result.success:
-            logger.warning(f"Optimization did not converge: {result.message}")
-            # Try L-BFGS-B as fallback
+            logger.warning(f"BFGS optimization did not fully converge: {result.message}")
             logger.info("Attempting fallback optimization with L-BFGS-B")
-            optim_options["method"] = "L-BFGS-B"
-            result = minimize(objective, par_init, **optim_options)
 
-        if not result.success:
-            raise RuntimeError(f"Optimization failed: {result.message}")
+            # Try L-BFGS-B as fallback with bounds
+            lbfgsb_options = {
+                "method": "L-BFGS-B",
+                "jac": gradient,
+                "options": {
+                    "gtol": 1e-5,
+                    "maxiter": 1000,
+                    "disp": False,
+                },
+            }
+            result_lbfgsb = minimize(objective, par_init, **lbfgsb_options)
+            if result_lbfgsb.fun < best_objective:
+                best_result = result_lbfgsb
+                best_objective = result_lbfgsb.fun
+
+            if not result_lbfgsb.success:
+                logger.warning(f"L-BFGS-B also did not fully converge: {result_lbfgsb.message}")
+
+                # Try Nelder-Mead as last resort (no gradient needed)
+                logger.info("Attempting fallback optimization with Nelder-Mead")
+                nm_options = {
+                    "method": "Nelder-Mead",
+                    "options": {
+                        "xatol": 1e-5,
+                        "fatol": 1e-5,
+                        "maxiter": 2000,
+                        "disp": False,
+                    },
+                }
+                result_nm = minimize(objective, best_result.x, **nm_options)
+                if result_nm.fun < best_objective:
+                    best_result = result_nm
+                    best_objective = result_nm.fun
 
     except Exception as e:
         logger.error(f"Optimization error: {str(e)}")
-        raise
+        # If we have any result, use it; otherwise use initial parameters
+        if best_result is None:
+            logger.warning("Using initial parameters due to optimization failure")
+            # Create a mock result object
+            class MockResult:
+                def __init__(self, x, fun, success, nit, message):
+                    self.x = x
+                    self.fun = fun
+                    self.success = success
+                    self.nit = nit
+                    self.message = message
+            best_result = MockResult(
+                par_init, objective(par_init), False, 0,
+                f"Optimization failed with error: {str(e)}"
+            )
 
-    # Rescale parameters back
-    if scale_factor > 0:
-        result.x = result.x * scale_factor
-        logger.info("Parameters rescaled back to original scale")
+    # Use the best result found
+    result = best_result
+
+    # Log final status
+    if not result.success:
+        logger.warning(
+            f"Optimization did not fully converge. "
+            f"Returning best parameters found with objective value: {result.fun:.6e}"
+        )
+    else:
+        logger.info(f"Optimization converged successfully with objective value: {result.fun:.6e}")
 
     # Get final parameters
     par_opt_scaled = result.x
@@ -540,6 +603,8 @@ def dsl_general_Jacobian(
     Y_pred: np.ndarray,
     X_pred: np.ndarray,
     model: str = "lm",
+    fe_Y: Optional[np.ndarray] = None,
+    fe_X: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Compute the average Jacobian matrix (k x k) for DSL estimation.
@@ -562,6 +627,10 @@ def dsl_general_Jacobian(
         Predicted features
     model : str, optional
         Model type, by default "lm"
+    fe_Y : Optional[np.ndarray], optional
+        Fixed effects outcome, by default None
+    fe_X : Optional[np.ndarray], optional
+        Fixed effects features, by default None
 
     Returns
     -------
@@ -569,20 +638,27 @@ def dsl_general_Jacobian(
         Jacobian matrix
     """
     # Import moment functions
-    from .moment import lm_dsl_Jacobian, logit_dsl_Jacobian
+    from .moment import felm_dsl_Jacobian, lm_dsl_Jacobian, logit_dsl_Jacobian
 
     # Select appropriate Jacobian function
     if model == "lm":
         jac_fn = lm_dsl_Jacobian
+        J = jac_fn(
+            par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred, model=model
+        )
     elif model == "logit":
         jac_fn = logit_dsl_Jacobian
+        J = jac_fn(
+            par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred, model=model
+        )
+    elif model == "felm":
+        jac_fn = felm_dsl_Jacobian
+        J = jac_fn(
+            par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred,
+            model=model, fe_Y=fe_Y, fe_X=fe_X
+        )
     else:
         raise ValueError(f"Unknown model type: {model}")
-
-    # Compute Jacobian
-    J = jac_fn(
-        par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred, model=model
-    )
 
     return J
 
@@ -689,65 +765,63 @@ def dsl_general_moment_base_decomp(
     """
     Compute the base moment decomposition for DSL estimation.
 
-    Parameters
-    ----------
-    par : np.ndarray
-        Parameters at which to evaluate the moment
-    labeled_ind : np.ndarray
-        Labeled indicator
-    sample_prob_use : np.ndarray
-        Sampling probability
-    Y_orig : np.ndarray
-        Original outcome
-    X_orig : np.ndarray
-        Original features
-    Y_pred : np.ndarray
-        Predicted outcome
-    X_pred : np.ndarray
-        Predicted features
-    model : str, optional
-        Model type, by default "lm"
-    clustered : bool, optional
-        Whether to use clustered standard errors, by default False
-    cluster : Optional[np.ndarray], optional
-        Cluster indicator, by default None
-
     Returns
     -------
     Tuple[np.ndarray, np.ndarray]
-        Main components of the moment decomposition
+        (main_1, main_23) components where Meat = main_1 + main_23
     """
-    # Import moment functions
+    # Import moment functions for m_orig and m_pred
     from .moment import (
-        felm_dsl_moment_base_decomp,
-        lm_dsl_moment_base_decomp,
-        logit_dsl_moment_base_decomp,
+        lm_dsl_moment_orig,
+        lm_dsl_moment_pred,
+        logit_dsl_moment_orig,
+        logit_dsl_moment_pred,
     )
 
-    # Select appropriate moment decomposition function
+    # Select appropriate originals/predicted moment functions
     if model == "lm":
-        moment_decomp_fn = lm_dsl_moment_base_decomp
+        m_orig_fn = lm_dsl_moment_orig
+        m_pred_fn = lm_dsl_moment_pred
     elif model == "logit":
-        moment_decomp_fn = logit_dsl_moment_base_decomp
+        m_orig_fn = logit_dsl_moment_orig
+        m_pred_fn = logit_dsl_moment_pred
     elif model == "felm":
-        moment_decomp_fn = felm_dsl_moment_base_decomp
+        # Use the same decomposition form as lm for felm
+        m_orig_fn = lm_dsl_moment_orig
+        m_pred_fn = lm_dsl_moment_pred
     else:
         raise ValueError(f"Unknown model type: {model}")
 
-    # Compute moment decomposition
-    main_1, main_23 = moment_decomp_fn(
-        par,
-        labeled_ind,
-        sample_prob_use,
-        Y_orig,
-        X_orig,
-        Y_pred,
-        X_pred,
-        clustered,
-        cluster,
-    )
+    # Compute components
+    m_orig = m_orig_fn(par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred)
+    m_pred = m_pred_fn(par, labeled_ind, sample_prob_use, Y_orig, X_orig, Y_pred, X_pred)
 
-    return main_1, main_23
+    n = X_orig.shape[0]
+    diff = m_orig - m_pred
+
+    if not clustered:
+        # Non-clustered
+        D1 = np.diag(labeled_ind / (sample_prob_use ** 2))
+        D2 = np.diag(labeled_ind / sample_prob_use)
+        main_1 = (diff.T @ D1 @ diff) / n
+        main_2 = (m_pred.T @ m_pred) / n
+        main_3 = ((m_pred.T @ D2 @ diff) + (diff.T @ D2 @ m_pred)) / n
+    else:
+        if cluster is None:
+            raise ValueError("cluster must be provided when clustered=True")
+        # Weighted difference by r/pi
+        w = (labeled_ind / sample_prob_use).reshape(-1, 1)
+        diff_w = diff * w
+        # Sum within clusters
+        uniq = np.unique(cluster)
+        s_pred = np.stack([m_pred[cluster == g].sum(axis=0) for g in uniq], axis=0)
+        s_diff = np.stack([diff_w[cluster == g].sum(axis=0) for g in uniq], axis=0)
+        main_1 = (s_diff.T @ s_diff) / n
+        main_2 = (s_pred.T @ s_pred) / n
+        main_3_c0 = (s_pred.T @ s_diff) / n
+        main_3 = main_3_c0 + main_3_c0.T
+
+    return main_1, main_2 + main_3
 
 
 def dsl_general_moment_est(

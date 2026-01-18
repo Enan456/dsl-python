@@ -275,66 +275,35 @@ def logit_dsl_Jacobian(
     model: str,
 ) -> np.ndarray:
     """
-    Average Jacobian (k x k) for logistic regression moments.
-    J = E[d(m_i)/d(par)] = - E[w_i * x_i @ x_i.T]
-    Estimated as J_hat = - (1/n) * sum(w_dr_i * x_pred_i @ x_pred_i.T)
-                 = - (1/n) * X_pred.T @ W_dr @ X_pred
-
-    Parameters
-    ----------
-    par : np.ndarray
-        Parameter vector (k,)
-    labeled_ind : np.ndarray
-        Labeled indicator (n,)
-    sample_prob_use : np.ndarray
-        Sampling probability (n,)
-    Y_orig : np.ndarray
-        Original outcome (flattened) (n,)
-    X_orig : np.ndarray
-        Original features (n, k)
-    Y_pred : np.ndarray
-        Predicted outcome (flattened) (n,)
-    X_pred : np.ndarray
-        Predicted features (n, k)
-    model : str
-        Model type (unused)
-
-    Returns
-    -------
-    np.ndarray
-        Average Jacobian matrix (k, k)
+    Average Jacobian (k x k) for logistic regression moments using the R-equivalent
+    decomposition: J = grad_pred + grad_orig - grad_pred_R, where weights are
+    p*(1-p) on the appropriate design matrices.
     """
-    n_obs = X_pred.shape[0]
-    n_features = X_pred.shape[1]
+    n = X_pred.shape[0]
 
-    # Calculate probabilities and weights p*(1-p)
-    p_orig = 1 / (1 + np.exp(-X_orig @ par))
-    w_orig = p_orig * (1 - p_orig)
-    w_orig[labeled_ind == 0] = 0  # Zero out weights for unlabeled original moments
+    # Predicted-side weights
+    z_pred = X_pred @ par
+    exp_neg_pred = np.exp(-z_pred)
+    w_pred = exp_neg_pred / (1 + exp_neg_pred) ** 2  # == p_pred * (1 - p_pred)
+    W_pred = np.diag(w_pred)
+    W_pred_R = np.diag(w_pred * (labeled_ind / sample_prob_use))
 
-    p_pred = 1 / (1 + np.exp(-X_pred @ par))
-    w_pred = p_pred * (1 - p_pred)
+    grad_pred = (X_pred.T @ W_pred @ X_pred) / n
+    grad_pred_R = (X_pred.T @ W_pred_R @ X_pred) / n
 
-    # Calculate doubly robust weights
-    prob_ratio = np.nan_to_num(
-        labeled_ind / sample_prob_use, nan=0.0, posinf=0.0, neginf=0.0
-    )
-    w_dr = w_pred + (w_orig - w_pred) * prob_ratio
+    # Original-side weights (zero-out unlabeled in both X and weights)
+    Xo = X_orig.copy()
+    Xo[labeled_ind == 0] = 0
+    z_orig = Xo @ par
+    exp_neg_orig = np.exp(-z_orig)
+    w_orig = exp_neg_orig / (1 + exp_neg_orig) ** 2
+    w_orig[labeled_ind == 0] = 0
+    W_orig_R = np.diag(w_orig * (labeled_ind / sample_prob_use))
 
-    # Construct diagonal weight matrix W_dr
-    W_dr_diag = np.diag(w_dr)
+    grad_orig = (Xo.T @ W_orig_R @ Xo) / n
 
-    # Compute average Jacobian: J = - (1/n) * X_pred.T @ W_dr @ X_pred
-    # Using X_pred consistent with sandwich::vcovGMM which uses model matrix
-    J_avg = -(X_pred.T @ W_dr_diag @ X_pred) / n_obs
-
-    if J_avg.shape != (n_features, n_features):
-        raise ValueError(
-            f"Logit Jacobian shape error: expected ({n_features},{n_features}), "
-            f"got {J_avg.shape}"
-        )
-
-    return J_avg
+    J = grad_pred + grad_orig - grad_pred_R
+    return J
 
 
 def felm_dsl_moment_base(
@@ -368,7 +337,7 @@ def felm_dsl_moment_base(
     X_pred : np.ndarray
         Predicted features
     fe_Y : np.ndarray
-        Fixed effects outcome
+        Fixed effects outcome (should be 1D array of shape (n,))
     fe_X : np.ndarray
         Fixed effects features
 
@@ -382,23 +351,108 @@ def felm_dsl_moment_base(
     par_main = par[:n_main]
     par_fe = par[n_main:]
 
-    # Compute fixed effects
-    fe_use = fe_Y - fe_X @ par_fe
+    # Handle fixed effects - they should contribute as fe_X @ par_fe
+    # fe_X has shape (n, n_fe) and par_fe has shape (n_fe,) if present
+    if par_fe.size == 0:
+        # No fixed effect parameters, use zeros
+        fe_use = np.zeros(Y_orig.shape[0])
+    else:
+        # Compute fixed effects contribution: fe_X @ par_fe produces 1D array of shape (n,)
+        fe_use = (fe_X @ par_fe).flatten()
+
+    # Ensure all inputs are properly shaped for broadcasting
+    Y_orig_flat = Y_orig.flatten()
+    Y_pred_flat = Y_pred.flatten()
 
     # Original moment with fixed effects
-    m_orig = X_orig * (Y_orig - X_orig @ par_main - fe_use).reshape(-1, 1)
-    m_orig = m_orig * labeled_ind.reshape(-1, 1)
+    residuals_orig = (Y_orig_flat - X_orig @ par_main - fe_use).reshape(-1, 1)
+    m_orig = X_orig * residuals_orig
+    m_orig[labeled_ind == 0] = 0
 
     # Predicted moment with fixed effects
-    m_pred = X_pred * (Y_pred - X_pred @ par_main - fe_use).reshape(-1, 1)
+    residuals_pred = (Y_pred_flat - X_pred @ par_main - fe_use).reshape(-1, 1)
+    m_pred = X_pred * residuals_pred
 
-    # Combined moment
-    m_dr = m_pred + (m_orig - m_pred) * (labeled_ind / sample_prob_use).reshape(-1, 1)
-
-    # Zero out unlabeled observations
-    m_dr = m_dr * labeled_ind.reshape(-1, 1)
+    # Combined moment (doubly robust)
+    weights = (labeled_ind / sample_prob_use).reshape(-1, 1)
+    m_dr = m_pred + (m_orig - m_pred) * weights
 
     return m_dr
+
+
+def felm_dsl_Jacobian(
+    par: np.ndarray,
+    labeled_ind: np.ndarray,
+    sample_prob_use: np.ndarray,
+    Y_orig: np.ndarray,
+    X_orig: np.ndarray,
+    Y_pred: np.ndarray,
+    X_pred: np.ndarray,
+    model: str,
+    fe_Y: np.ndarray = None,
+    fe_X: np.ndarray = None,
+) -> np.ndarray:
+    """
+    Jacobian for fixed effects linear regression.
+
+    Parameters
+    ----------
+    par : np.ndarray
+        Parameter vector
+    labeled_ind : np.ndarray
+        Labeled indicator
+    sample_prob_use : np.ndarray
+        Sampling probability
+    Y_orig : np.ndarray
+        Original outcome
+    X_orig : np.ndarray
+        Original features
+    Y_pred : np.ndarray
+        Predicted outcome
+    X_pred : np.ndarray
+        Predicted features
+    model : str
+        Model type
+    fe_Y : np.ndarray, optional
+        Fixed effects outcome
+    fe_X : np.ndarray, optional
+        Fixed effects features
+
+    Returns
+    -------
+    np.ndarray
+        Jacobian matrix
+    """
+    # For fixed effects linear model, the Jacobian is the same as the linear model
+    # because the moment conditions have the same structure with respect to par
+    # Zero out unlabeled observations in X_orig
+    X_orig_copy = X_orig.copy()
+    X_orig_copy[labeled_ind == 0] = 0
+
+    # Convert to sparse matrices for efficiency
+    X_orig_sparse = csr_matrix(X_orig_copy)
+    X_pred_sparse = csr_matrix(X_pred)
+
+    # Create diagonal matrices
+    diag_1 = csr_matrix(
+        (
+            labeled_ind / sample_prob_use,
+            (np.arange(len(labeled_ind)), np.arange(len(labeled_ind))),
+        )
+    )
+    diag_2 = csr_matrix(
+        (
+            1 - labeled_ind / sample_prob_use,
+            (np.arange(len(labeled_ind)), np.arange(len(labeled_ind))),
+        )
+    )
+
+    # Compute Jacobian following R's implementation
+    term1 = X_orig_sparse.T @ diag_1 @ X_orig_sparse
+    term2 = X_pred_sparse.T @ diag_2 @ X_pred_sparse
+    J = (term1 + term2) / X_orig.shape[0]
+
+    return J.toarray()
 
 
 def demean_dsl(
@@ -424,105 +478,42 @@ def demean_dsl(
     Returns
     -------
     Tuple[np.ndarray, np.ndarray, pd.DataFrame]
-        Demeaned outcome, features, and data frame
+        Demeaned outcome, demeaned features, and data frame
     """
-    # Create fixed effect matrix
-    fixed_effect_use = pd.get_dummies(data_base[index])
+    n = len(data_base)
+    n_features = adj_X.shape[1] if adj_X.ndim > 1 else 1
 
-    # Demean outcome and features
-    fixed_effect_Y = (
-        fixed_effect_use.values
-        @ np.linalg.inv(fixed_effect_use.T @ fixed_effect_use)
-        @ fixed_effect_use.T
-        @ adj_Y
-    )
+    # Initialize demeaned arrays
+    demeaned_Y = np.zeros(n)
+    demeaned_X = np.zeros((n, n_features)) if n_features > 1 else np.zeros(n)
 
-    fixed_effect_X = (
-        fixed_effect_use.values
-        @ np.linalg.inv(fixed_effect_use.T @ fixed_effect_use)
-        @ fixed_effect_use.T
-        @ adj_X
-    )
+    # Create group variable by combining all index columns
+    if len(index) == 1:
+        group_var = data_base[index[0]].values
+    else:
+        # For multiple fixed effects, create a combined group identifier
+        group_var = data_base[index].apply(lambda x: tuple(x), axis=1).values
 
-    # Create adjusted data frame
+    # Demean within each group
+    unique_groups = np.unique(group_var)
+    for group in unique_groups:
+        mask = group_var == group
+
+        # Compute group means
+        Y_group_mean = np.mean(adj_Y[mask])
+        X_group_mean = np.mean(adj_X[mask], axis=0) if adj_X.ndim > 1 else np.mean(adj_X[mask])
+
+        # Demean
+        demeaned_Y[mask] = adj_Y[mask] - Y_group_mean
+        if adj_X.ndim > 1:
+            demeaned_X[mask] = adj_X[mask] - X_group_mean
+        else:
+            demeaned_X[mask] = adj_X[mask] - X_group_mean
+
+    # Create adjusted data frame with demeaned features
     adj_data = pd.DataFrame(
-        np.column_stack([data_base[["id"] + index], adj_X]),
-        columns=["id"] + index + [f"x{i+1}" for i in range(adj_X.shape[1])],
+        np.column_stack([data_base[["id"] + index], demeaned_X]),
+        columns=["id"] + index + [f"x{i+1}" for i in range(n_features)],
     )
 
-    return fixed_effect_Y, fixed_effect_X, adj_data
-
-
-def felm_dsl_Jacobian(
-    par: np.ndarray,
-    labeled_ind: np.ndarray,
-    sample_prob_use: np.ndarray,
-    Y_orig: np.ndarray,
-    X_orig: np.ndarray,
-    Y_pred: np.ndarray,
-    X_pred: np.ndarray,
-    model: str,
-    fe_Y: np.ndarray,
-    fe_X: np.ndarray,
-) -> np.ndarray:
-    """
-    Jacobian for fixed effects regression.
-
-    Parameters
-    ----------
-    par : np.ndarray
-        Parameter vector
-    labeled_ind : np.ndarray
-        Labeled indicator
-    sample_prob_use : np.ndarray
-        Sampling probability
-    Y_orig : np.ndarray
-        Original outcome
-    X_orig : np.ndarray
-        Original features
-    Y_pred : np.ndarray
-        Predicted outcome
-    X_pred : np.ndarray
-        Predicted features
-    model : str
-        Model type
-    fe_Y : np.ndarray
-        Fixed effects outcome
-    fe_X : np.ndarray
-        Fixed effects features
-
-    Returns
-    -------
-    np.ndarray
-        Jacobian matrix
-    """
-    # Split parameters into main effects and fixed effects
-    n_main = X_orig.shape[1]
-
-    # Original moment with fixed effects
-    X_o = X_orig.copy()
-    X_o = X_o * labeled_ind.reshape(-1, 1)
-
-    # For fixed effects, use sparse matrices
-    X_o = csr_matrix(X_o)
-    X_p = csr_matrix(X_pred)
-
-    # Compute diagonal matrices
-    d1 = np.diag(labeled_ind / sample_prob_use)
-    d2 = np.diag(1 - labeled_ind / sample_prob_use)
-
-    # Compute Jacobian for main effects
-    J_main = (X_o.T @ d1 @ X_o + X_p.T @ d2 @ X_p) / len(X_orig)
-
-    # Compute Jacobian for fixed effects
-    J_fe = fe_X.T @ fe_X / len(X_orig)
-
-    # Combine Jacobians
-    J = np.block(
-        [
-            [J_main, np.zeros((n_main, fe_X.shape[1]))],
-            [np.zeros((fe_X.shape[1], n_main)), J_fe],
-        ]
-    )
-
-    return J
+    return demeaned_Y, demeaned_X, adj_data

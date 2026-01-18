@@ -4,13 +4,13 @@ from .dsl import dsl
 
 
 def power_dsl(
-    model,
-    formula,
-    predicted_var,
-    prediction,
-    data,
-    labeled_ind,
-    sample_prob,
+    model=None,
+    formula=None,
+    predicted_var=None,
+    prediction=None,
+    data=None,
+    labeled_ind=None,
+    sample_prob=None,
     sl_method="grf",
     feature=None,
     family="gaussian",
@@ -64,6 +64,17 @@ def power_dsl(
         Object containing power analysis results.
     """
     if dsl_output is None:
+        # Validate required arguments when dsl_output is not provided
+        if model is None or formula is None or predicted_var is None or prediction is None:
+            raise ValueError(
+                "When dsl_output is not provided, model, formula, predicted_var, "
+                "and prediction are required."
+            )
+        if data is None or labeled_ind is None or sample_prob is None:
+            raise ValueError(
+                "When dsl_output is not provided, data, labeled_ind, and sample_prob "
+                "are required."
+            )
         dsl_output = dsl(
             model=model,
             formula=formula,

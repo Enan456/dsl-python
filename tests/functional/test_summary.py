@@ -32,24 +32,25 @@ def test_summary_dsl(sample_data, sample_prediction):
     # Run summary
     result = summary(dsl_result)
 
-    # Check result
+    # Check result - summary returns a DataFrame
     assert result is not None
-    assert hasattr(result, "coefficients")
-    assert hasattr(result, "standard_errors")
-    assert hasattr(result, "t_values")
-    assert hasattr(result, "p_values")
+    import pandas as pd
+    assert isinstance(result, pd.DataFrame)
 
-    # Check shapes
-    assert result.coefficients.shape == (6,)  # 5 features + intercept
-    assert result.standard_errors.shape == (6,)
-    assert result.t_values.shape == (6,)
-    assert result.p_values.shape == (6,)
+    # Check columns exist
+    assert "Estimate" in result.columns
+    assert "Std. Error" in result.columns
+    assert "t value" in result.columns
+    assert "Pr(>|t|)" in result.columns
+
+    # Check shapes - 5 features + intercept = 6 rows
+    assert len(result) == 6
 
     # Check values
-    assert np.all(np.isfinite(result.coefficients))
-    assert np.all(result.standard_errors >= 0)
-    assert np.all(np.isfinite(result.t_values))
-    assert np.all((result.p_values >= 0) & (result.p_values <= 1))
+    assert np.all(np.isfinite(result["Estimate"].values))
+    assert np.all(result["Std. Error"].values >= 0)
+    assert np.all(np.isfinite(result["t value"].values))
+    assert np.all((result["Pr(>|t|)"].values >= 0) & (result["Pr(>|t|)"].values <= 1))
 
 
 def test_summary_power_dsl(sample_data, sample_prediction):
@@ -89,12 +90,12 @@ def test_summary_power_dsl(sample_data, sample_prediction):
     assert hasattr(result, "critical_value")
     assert hasattr(result, "alpha")
 
-    # Check values
-    assert isinstance(result.power, float)
-    assert isinstance(result.predicted_se, float)
-    assert isinstance(result.critical_value, float)
-    assert isinstance(result.alpha, float)
+    # Check values - power is float, predicted_se is array
+    assert isinstance(result.power, (int, float, np.floating))
+    assert isinstance(result.predicted_se, np.ndarray)
+    assert isinstance(result.critical_value, (int, float, np.floating))
+    assert isinstance(result.alpha, (int, float, np.floating))
     assert 0 <= result.power <= 1
-    assert result.predicted_se >= 0
+    assert np.all(result.predicted_se >= 0)
     assert result.critical_value >= 0
     assert 0 <= result.alpha <= 1
