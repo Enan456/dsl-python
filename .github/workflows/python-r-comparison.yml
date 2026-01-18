@@ -58,6 +58,8 @@ jobs:
 
     - name: Generate detailed comparison report with metrics
       if: always()
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         python scripts/run_comparison.py \
           --report-dir reports \
