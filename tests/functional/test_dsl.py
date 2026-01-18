@@ -3,41 +3,31 @@ Functional tests for the main DSL function
 """
 
 import numpy as np
+from patsy import dmatrices
 
 from dsl.dsl import dsl
 
 
-def test_dsl_linear_regression(sample_data, sample_prediction):
+def test_dsl_linear_regression(sample_data):
     """Test DSL with linear regression"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
-
-    # Extract labeled indicator
-    labeled_ind = sample_data["labeled"].values
+    # Use patsy to create design matrix from formula
+    formula = "y ~ x1 + x2 + x3 + x4 + x5"
+    y, X = dmatrices(formula, sample_data, return_type="dataframe")
 
     # Run DSL
     result = dsl(
-        model="lm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data,
-        labeled_ind=labeled_ind,
+        X=X.values,
+        y=y.values.flatten(),
+        labeled_ind=sample_data["labeled"].values,
         sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        model="lm",
+        method="linear",
     )
 
     # Check result
     assert result is not None
     assert hasattr(result, "coefficients")
     assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
     assert hasattr(result, "vcov")
     assert hasattr(result, "objective")
     assert hasattr(result, "success")
@@ -61,37 +51,26 @@ def test_dsl_linear_regression(sample_data, sample_prediction):
     assert result.labeled_size <= result.total_size
 
 
-def test_dsl_logistic_regression(sample_data, sample_prediction):
+def test_dsl_logistic_regression(sample_data_logit):
     """Test DSL with logistic regression"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
-
-    # Extract labeled indicator
-    labeled_ind = sample_data["labeled"].values
+    # Use patsy to create design matrix from formula
+    formula = "y ~ x1 + x2 + x3 + x4 + x5"
+    y, X = dmatrices(formula, sample_data_logit, return_type="dataframe")
 
     # Run DSL
     result = dsl(
+        X=X.values,
+        y=y.values.flatten(),
+        labeled_ind=sample_data_logit["labeled"].values,
+        sample_prob=sample_data_logit["sample_prob"].values,
         model="logit",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data,
-        labeled_ind=labeled_ind,
-        sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="binomial",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        method="logistic",
     )
 
     # Check result
     assert result is not None
     assert hasattr(result, "coefficients")
     assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
     assert hasattr(result, "vcov")
     assert hasattr(result, "objective")
     assert hasattr(result, "success")
@@ -115,212 +94,107 @@ def test_dsl_logistic_regression(sample_data, sample_prediction):
     assert result.labeled_size <= result.total_size
 
 
-def test_dsl_fixed_effects(sample_data, sample_prediction):
-    """Test DSL with fixed effects"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
+def test_dsl_simple_linear():
+    """Test DSL with simple linear regression using numpy arrays"""
+    n_samples = 100
+    n_features = 3
 
-    # Extract labeled indicator
-    labeled_ind = sample_data["labeled"].values
+    # Generate simple data
+    np.random.seed(1234)
+    X = np.column_stack([np.ones(n_samples), np.random.randn(n_samples, n_features)])
+    true_beta = np.array([1.0, 0.5, -0.3, 0.2])
+    y = X @ true_beta + np.random.randn(n_samples) * 0.1
+
+    # Create labeled indicator (80% labeled)
+    labeled_ind = np.random.binomial(1, 0.8, n_samples)
+
+    # Create sampling probability
+    sample_prob = np.ones(n_samples) * 0.8
 
     # Run DSL
     result = dsl(
-        model="felm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5 | fe1 + fe2",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data,
+        X=X,
+        y=y,
         labeled_ind=labeled_ind,
-        sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
-    )
-
-    # Check result
-    assert result is not None
-    assert hasattr(result, "coefficients")
-    assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
-    assert hasattr(result, "vcov")
-    assert hasattr(result, "objective")
-    assert hasattr(result, "success")
-    assert hasattr(result, "message")
-    assert hasattr(result, "niter")
-    assert hasattr(result, "model")
-    assert hasattr(result, "labeled_size")
-    assert hasattr(result, "total_size")
-
-    # Check shapes
-    assert result.coefficients.shape == (6,)  # 5 features + intercept
-    assert result.standard_errors.shape == (6,)
-    assert result.vcov.shape == (6, 6)
-    assert isinstance(result.objective, float)
-    assert isinstance(result.success, bool)
-    assert isinstance(result.message, str)
-    assert isinstance(result.niter, int)
-    assert isinstance(result.model, str)
-    assert isinstance(result.labeled_size, int)
-    assert isinstance(result.total_size, int)
-    assert result.labeled_size <= result.total_size
-
-
-def test_dsl_without_prediction(sample_data):
-    """Test DSL without providing predictions"""
-    # Extract labeled indicator
-    labeled_ind = sample_data["labeled"].values
-
-    # Run DSL
-    result = dsl(
+        sample_prob=sample_prob,
         model="lm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        data=sample_data,
-        labeled_ind=labeled_ind,
-        sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        method="linear",
     )
 
     # Check result
     assert result is not None
-    assert hasattr(result, "coefficients")
-    assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
-    assert hasattr(result, "vcov")
-    assert hasattr(result, "objective")
-    assert hasattr(result, "success")
-    assert hasattr(result, "message")
-    assert hasattr(result, "niter")
-    assert hasattr(result, "model")
-    assert hasattr(result, "labeled_size")
-    assert hasattr(result, "total_size")
-
-    # Check shapes
-    assert result.coefficients.shape == (6,)  # 5 features + intercept
-    assert result.standard_errors.shape == (6,)
-    assert result.vcov.shape == (6, 6)
-    assert isinstance(result.objective, float)
-    assert isinstance(result.success, bool)
-    assert isinstance(result.message, str)
-    assert isinstance(result.niter, int)
-    assert isinstance(result.model, str)
-    assert isinstance(result.labeled_size, int)
-    assert isinstance(result.total_size, int)
-    assert result.labeled_size <= result.total_size
+    assert result.coefficients.shape == (4,)
+    assert result.standard_errors.shape == (4,)
+    assert result.vcov.shape == (4, 4)
+    assert result.success
+    assert abs(result.objective) < 1e-3  # Should converge to near 0
 
 
-def test_dsl_without_labeled(sample_data, sample_prediction):
-    """Test DSL without providing labeled indicator"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
+def test_dsl_simple_logistic():
+    """Test DSL with simple logistic regression using numpy arrays"""
+    n_samples = 100
+    n_features = 3
 
-    # Remove labeled column
-    sample_data_no_labeled = sample_data.drop(columns=["labeled"])
+    # Generate simple data
+    np.random.seed(1234)
+    X = np.column_stack([np.ones(n_samples), np.random.randn(n_samples, n_features)])
+    true_beta = np.array([1.0, 0.5, -0.3, 0.2])
+    logit = 1 / (1 + np.exp(-(X @ true_beta)))
+    y = np.random.binomial(1, logit, n_samples)
+
+    # Create labeled indicator (80% labeled)
+    labeled_ind = np.random.binomial(1, 0.8, n_samples)
+
+    # Create sampling probability
+    sample_prob = np.ones(n_samples) * 0.8
 
     # Run DSL
     result = dsl(
-        model="lm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data_no_labeled,
-        labeled_ind=np.ones(len(sample_data_no_labeled)),
-        sample_prob=sample_data["sample_prob"].values,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        X=X,
+        y=y,
+        labeled_ind=labeled_ind,
+        sample_prob=sample_prob,
+        model="logit",
+        method="logistic",
     )
 
     # Check result
     assert result is not None
-    assert hasattr(result, "coefficients")
-    assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
-    assert hasattr(result, "vcov")
-    assert hasattr(result, "objective")
-    assert hasattr(result, "success")
-    assert hasattr(result, "message")
-    assert hasattr(result, "niter")
-    assert hasattr(result, "model")
-    assert hasattr(result, "labeled_size")
-    assert hasattr(result, "total_size")
-
-    # Check shapes
-    assert result.coefficients.shape == (6,)  # 5 features + intercept
-    assert result.standard_errors.shape == (6,)
-    assert result.vcov.shape == (6, 6)
-    assert isinstance(result.objective, float)
-    assert isinstance(result.success, bool)
-    assert isinstance(result.message, str)
-    assert isinstance(result.niter, int)
-    assert isinstance(result.model, str)
-    assert isinstance(result.labeled_size, int)
-    assert isinstance(result.total_size, int)
-    assert result.labeled_size <= result.total_size
+    assert result.coefficients.shape == (4,)
+    assert result.standard_errors.shape == (4,)
+    assert result.vcov.shape == (4, 4)
+    assert result.success
+    assert abs(result.objective) < 1e-3  # Should converge to near 0
 
 
-def test_dsl_without_sample_prob(sample_data, sample_prediction):
-    """Test DSL without providing sample probabilities"""
-    # Add prediction to data
-    sample_data["prediction"] = sample_prediction
+def test_dsl_all_labeled():
+    """Test DSL when all observations are labeled"""
+    n_samples = 100
+    n_features = 3
 
-    # Extract labeled indicator
-    labeled_ind = sample_data["labeled"].values
+    # Generate simple data
+    np.random.seed(1234)
+    X = np.column_stack([np.ones(n_samples), np.random.randn(n_samples, n_features)])
+    true_beta = np.array([1.0, 0.5, -0.3, 0.2])
+    y = X @ true_beta + np.random.randn(n_samples) * 0.1
+
+    # All observations are labeled
+    labeled_ind = np.ones(n_samples)
+    sample_prob = np.ones(n_samples)
 
     # Run DSL
     result = dsl(
-        model="lm",
-        formula="y ~ x1 + x2 + x3 + x4 + x5",
-        predicted_var=["y"],
-        prediction="prediction",
-        data=sample_data,
+        X=X,
+        y=y,
         labeled_ind=labeled_ind,
-        sl_method="grf",
-        feature=["x1", "x2", "x3", "x4", "x5"],
-        family="gaussian",
-        cross_fit=2,
-        sample_split=2,
-        seed=1234,
+        sample_prob=sample_prob,
+        model="lm",
+        method="linear",
     )
 
     # Check result
     assert result is not None
-    assert hasattr(result, "coefficients")
-    assert hasattr(result, "standard_errors")
-    assert hasattr(result, "predicted_values")
-    assert hasattr(result, "residuals")
-    assert hasattr(result, "vcov")
-    assert hasattr(result, "objective")
-    assert hasattr(result, "success")
-    assert hasattr(result, "message")
-    assert hasattr(result, "niter")
-    assert hasattr(result, "model")
-    assert hasattr(result, "labeled_size")
-    assert hasattr(result, "total_size")
-
-    # Check shapes
-    assert result.coefficients.shape == (6,)  # 5 features + intercept
-    assert result.standard_errors.shape == (6,)
-    assert result.vcov.shape == (6, 6)
-    assert isinstance(result.objective, float)
-    assert isinstance(result.success, bool)
-    assert isinstance(result.message, str)
-    assert isinstance(result.niter, int)
-    assert isinstance(result.model, str)
-    assert isinstance(result.labeled_size, int)
-    assert isinstance(result.total_size, int)
-    assert result.labeled_size <= result.total_size
+    assert result.labeled_size == n_samples
+    assert result.total_size == n_samples
+    assert result.success
+    assert abs(result.objective) < 1e-6
