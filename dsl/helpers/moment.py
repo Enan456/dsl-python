@@ -9,6 +9,38 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 
 
+def _stable_sigmoid(z: np.ndarray) -> np.ndarray:
+    """
+    Numerically stable sigmoid function.
+
+    Uses different formulas for positive and negative z to avoid overflow/underflow.
+    For z >= 0: sigmoid(z) = 1 / (1 + exp(-z))
+    For z < 0: sigmoid(z) = exp(z) / (1 + exp(z))
+
+    Parameters
+    ----------
+    z : np.ndarray
+        Input values (linear predictor)
+
+    Returns
+    -------
+    np.ndarray
+        Sigmoid values in range (0, 1)
+    """
+    result = np.zeros_like(z, dtype=np.float64)
+    pos_mask = z >= 0
+    neg_mask = ~pos_mask
+
+    # For z >= 0: 1 / (1 + exp(-z))
+    result[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
+
+    # For z < 0: exp(z) / (1 + exp(z)) - avoids exp(large positive) overflow
+    exp_z = np.exp(z[neg_mask])
+    result[neg_mask] = exp_z / (1.0 + exp_z)
+
+    return result
+
+
 def lm_dsl_moment_base(
     par: np.ndarray,
     labeled_ind: np.ndarray,
@@ -230,7 +262,7 @@ def logit_dsl_moment_base(
     if use_ipw:
         # IPW mode: Use predicted X values but only weight labeled observations
         # This is appropriate when predictions are in X (predicted_var is used)
-        p_pred = 1 / (1 + np.exp(-X_pred @ par))
+        p_pred = _stable_sigmoid(X_pred @ par)
         residuals_pred = (Y_pred.flatten() - p_pred).reshape(-1, 1)
         m_pred = X_pred * residuals_pred
         # IPW weighting: zeros out unlabeled contributions
@@ -239,7 +271,7 @@ def logit_dsl_moment_base(
     else:
         # Doubly-robust mode: Standard DSL formula
         # Original moment - element-wise multiplication of X_orig and residuals
-        p_orig = 1 / (1 + np.exp(-X_orig @ par))
+        p_orig = _stable_sigmoid(X_orig @ par)
         # Ensure Y_orig is flattened for correct subtraction
         residuals_orig = (Y_orig.flatten() - p_orig).reshape(-1, 1)
         # Broadcasting
@@ -247,7 +279,7 @@ def logit_dsl_moment_base(
         m_orig[labeled_ind == 0] = 0
 
         # Predicted moment - element-wise multiplication of X_pred and residuals
-        p_pred = 1 / (1 + np.exp(-X_pred @ par))
+        p_pred = _stable_sigmoid(X_pred @ par)
         # Ensure Y_pred is flattened for correct subtraction
         residuals_pred = (Y_pred.flatten() - p_pred).reshape(-1, 1)
         # Broadcasting
@@ -272,7 +304,7 @@ def logit_dsl_moment_orig(
     """
     Original moment function for logistic regression.
     """
-    p_orig = 1 / (1 + np.exp(-X_orig @ par))
+    p_orig = _stable_sigmoid(X_orig @ par)
     residuals_orig = (Y_orig.flatten() - p_orig).reshape(-1, 1)
     m_orig = X_orig * residuals_orig
     m_orig[labeled_ind == 0] = 0
@@ -291,7 +323,7 @@ def logit_dsl_moment_pred(
     """
     Predicted moment function for logistic regression.
     """
-    p_pred = 1 / (1 + np.exp(-X_pred @ par))
+    p_pred = _stable_sigmoid(X_pred @ par)
     residuals_pred = (Y_pred.flatten() - p_pred).reshape(-1, 1)
     m_pred = X_pred * residuals_pred
     return m_pred

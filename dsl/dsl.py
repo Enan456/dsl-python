@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .helpers.dsl_general import dsl_general
+from .helpers.dsl_general import dsl_general, _stable_sigmoid
 from .helpers.estimate import estimate_power
 
 
@@ -29,6 +29,7 @@ class DSLResult:
     total_size: int
     predicted_values: Optional[np.ndarray] = None
     residuals: Optional[np.ndarray] = None
+    coef_names: Optional[List[str]] = None
 
     def __getitem__(self, key):
         """Allow indexing of DSLResult object."""
@@ -234,6 +235,9 @@ def dsl(
             fe_Y = fe_data.values
             fe_X = fe_data.values
 
+        # Extract coefficient names from formula interface
+        coef_names = list(X_df.columns)
+
     else:
         # Array-based interface
         if X is None or y is None:
@@ -258,6 +262,10 @@ def dsl(
 
         fe_Y = None
         fe_X = None
+
+        # Generate default coefficient names for array-based interface
+        n_features = X.shape[1] if X.ndim > 1 else 1
+        coef_names = [f"beta_{i}" for i in range(n_features)]
 
     # Determine model type for dsl_general
     if model in ["lm", "linear"]:
@@ -318,7 +326,7 @@ def dsl(
         residuals = y - predicted_values
     elif model_internal == "logit":
         logits = X @ par
-        predicted_values = 1 / (1 + np.exp(-logits))
+        predicted_values = _stable_sigmoid(logits)
         residuals = y - predicted_values
     else:
         predicted_values = X @ par[:X.shape[1]]
@@ -338,6 +346,7 @@ def dsl(
         total_size=X.shape[0],
         predicted_values=predicted_values,
         residuals=residuals,
+        coef_names=coef_names,
     )
 
 
@@ -453,7 +462,7 @@ def summary(result: DSLResult) -> pd.DataFrame:
     t_values = result.coefficients / result.standard_errors
     p_values = 2 * (1 - stats.t.cdf(np.abs(t_values), df))
 
-    # Create summary table
+    # Create summary table with coefficient names if available
     summary_df = pd.DataFrame(
         {
             "Estimate": result.coefficients,
@@ -462,6 +471,10 @@ def summary(result: DSLResult) -> pd.DataFrame:
             "Pr(>|t|)": p_values,
         }
     )
+
+    # Use coefficient names as index if available
+    if result.coef_names is not None:
+        summary_df.index = result.coef_names
 
     return summary_df
 

@@ -13,6 +13,170 @@ from scipy.optimize import minimize
 logger = logging.getLogger(__name__)
 
 
+def validate_inputs(
+    Y: np.ndarray,
+    X: np.ndarray,
+    labeled_ind: np.ndarray,
+    sample_prob: np.ndarray,
+    model: str = "lm",
+) -> None:
+    """
+    Validate inputs for DSL estimation.
+
+    Parameters
+    ----------
+    Y : np.ndarray
+        Response variable
+    X : np.ndarray
+        Design matrix
+    labeled_ind : np.ndarray
+        Labeled indicator (1 for labeled, 0 for unlabeled)
+    sample_prob : np.ndarray
+        Sampling probability for each observation
+    model : str
+        Model type ("lm", "logit", "felm")
+
+    Raises
+    ------
+    ValueError
+        If any input validation fails
+    """
+    n_obs = X.shape[0]
+    n_features = X.shape[1] if X.ndim > 1 else 1
+
+    # Check for empty inputs
+    if n_obs == 0:
+        raise ValueError("Input arrays cannot be empty")
+
+    # Check dimensions match
+    Y_flat = np.asarray(Y).flatten()
+    if len(Y_flat) != n_obs:
+        raise ValueError(
+            f"Y length ({len(Y_flat)}) must match X rows ({n_obs})"
+        )
+
+    if len(labeled_ind) != n_obs:
+        raise ValueError(
+            f"labeled_ind length ({len(labeled_ind)}) must match X rows ({n_obs})"
+        )
+
+    if len(sample_prob) != n_obs:
+        raise ValueError(
+            f"sample_prob length ({len(sample_prob)}) must match X rows ({n_obs})"
+        )
+
+    # Check for NaN/inf in X
+    if np.any(~np.isfinite(X)):
+        nan_count = np.sum(np.isnan(X))
+        inf_count = np.sum(np.isinf(X))
+        raise ValueError(
+            f"X contains {nan_count} NaN and {inf_count} infinite values. "
+            "Please handle missing/infinite data before calling DSL."
+        )
+
+    # Check for NaN/inf in Y
+    if np.any(~np.isfinite(Y_flat)):
+        nan_count = np.sum(np.isnan(Y_flat))
+        inf_count = np.sum(np.isinf(Y_flat))
+        raise ValueError(
+            f"Y contains {nan_count} NaN and {inf_count} infinite values. "
+            "Please handle missing/infinite data before calling DSL."
+        )
+
+    # Validate labeled_ind is binary
+    unique_labels = np.unique(labeled_ind)
+    if not np.all(np.isin(unique_labels, [0, 1])):
+        raise ValueError(
+            f"labeled_ind must contain only 0 and 1. "
+            f"Found unique values: {unique_labels}"
+        )
+
+    # Check at least some labeled observations
+    n_labeled = int(np.sum(labeled_ind))
+    if n_labeled == 0:
+        raise ValueError(
+            "No labeled observations (labeled_ind contains no 1s). "
+            "DSL requires at least some labeled data."
+        )
+
+    # Check enough labeled for estimation
+    if n_labeled < n_features:
+        raise ValueError(
+            f"Not enough labeled observations ({n_labeled}) to estimate "
+            f"{n_features} parameters. Need at least {n_features} labeled points."
+        )
+
+    # Validate sample_prob is in valid range
+    if np.any(sample_prob <= 0):
+        raise ValueError(
+            "sample_prob must be strictly positive. "
+            f"Found {np.sum(sample_prob <= 0)} values <= 0."
+        )
+
+    if np.any(sample_prob > 1):
+        raise ValueError(
+            "sample_prob must be <= 1. "
+            f"Found {np.sum(sample_prob > 1)} values > 1."
+        )
+
+    # Check for very small sample_prob (numerical issues)
+    if np.any(sample_prob < 1e-10):
+        logger.warning(
+            f"sample_prob contains {np.sum(sample_prob < 1e-10)} very small values "
+            "(< 1e-10). This may cause numerical instability."
+        )
+
+    # Validate model type
+    valid_models = ["lm", "logit", "felm", "linear", "logistic"]
+    if model not in valid_models:
+        raise ValueError(
+            f"Unknown model type: '{model}'. "
+            f"Valid options are: {valid_models}"
+        )
+
+    # For logistic regression, check Y is binary
+    if model in ["logit", "logistic"]:
+        unique_y = np.unique(Y_flat[labeled_ind == 1])
+        if not np.all(np.isin(unique_y, [0, 1])):
+            raise ValueError(
+                f"For logistic regression, Y must be binary (0 or 1). "
+                f"Found unique values in labeled data: {unique_y}"
+            )
+
+
+def _stable_sigmoid(z: np.ndarray) -> np.ndarray:
+    """
+    Numerically stable sigmoid function.
+
+    Uses the log-sum-exp trick to avoid overflow/underflow for large |z|.
+    For z > 0: sigmoid(z) = 1 / (1 + exp(-z))
+    For z <= 0: sigmoid(z) = exp(z) / (1 + exp(z))
+
+    Parameters
+    ----------
+    z : np.ndarray
+        Input values (linear predictor)
+
+    Returns
+    -------
+    np.ndarray
+        Sigmoid values in range (0, 1)
+    """
+    # Use different formulas for positive and negative z to avoid overflow
+    result = np.zeros_like(z, dtype=np.float64)
+    pos_mask = z >= 0
+    neg_mask = ~pos_mask
+
+    # For z >= 0: 1 / (1 + exp(-z))
+    result[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
+
+    # For z < 0: exp(z) / (1 + exp(z)) - avoids exp(large positive) overflow
+    exp_z = np.exp(z[neg_mask])
+    result[neg_mask] = exp_z / (1.0 + exp_z)
+
+    return result
+
+
 def dsl_general(
     Y_orig: np.ndarray,
     X_orig: np.ndarray,
@@ -72,6 +236,9 @@ def dsl_general(
         logit_dsl_Jacobian,
         logit_dsl_moment_base,
     )
+
+    # Validate inputs before proceeding
+    validate_inputs(Y_orig, X_orig, labeled_ind, sample_prob_use, model)
 
     if moment_fn is None:
         if model == "lm":
@@ -456,70 +623,35 @@ def dsl_general(
     }
 
 
-def dsl_predict(X: np.ndarray, se: np.ndarray, model: str = "linear") -> np.ndarray:
+def dsl_predict(X: np.ndarray, coef: np.ndarray, model: str = "linear") -> np.ndarray:
     """
-    Predict using DSL estimates.
-    NOTE: This function might need revision. Using standard errors (se)
-    as initial parameters (beta) is likely incorrect for prediction.
-    It should probably use the estimated coefficients.
+    Predict using DSL estimated coefficients.
 
     Parameters
     ----------
     X : np.ndarray
-        Features
-    se : np.ndarray
-        Standard errors from labeled data estimation
+        Feature matrix of shape (n_samples, n_features)
+    coef : np.ndarray
+        Estimated coefficients from DSL estimation
     model : str, optional
-        Model type, by default "linear"
+        Model type: "linear", "lm", "felm" for linear regression,
+        "logit" or "logistic" for logistic regression. Default is "linear".
 
     Returns
     -------
     np.ndarray
-        Predicted values
+        Predicted values:
+        - For linear models: X @ coef (linear predictor)
+        - For logistic models: predicted probabilities P(Y=1|X)
     """
-    if model in ["linear", "felm"]:
-        # Add small regularization for numerical stability
-        reg_param = 1e-6
-        # X_dot_X = X.T @ X # Unused
-        # X_dot_X_inv = np.linalg.inv(X_dot_X + reg_param * np.eye(X_dot_X.shape[0]))
-        # Using standard errors as beta is likely wrong for prediction
-        # Should use estimated coefficients from dsl_general
-        beta = se
-        return X @ beta
-    elif model in ["logit", "logistic"]:  # Support both logit and logistic
-        # Initialize parameters with standard errors
-        beta = se
-        max_iter = 100
-        tol = 1e-6
-
-        for i in range(max_iter):
-            # Calculate probabilities
-            z = X @ beta
-            p = 1 / (1 + np.exp(-z))
-
-            # Calculate gradient and Hessian
-            W = np.diag(p * (1 - p))
-            hessian = X.T @ W @ X
-
-            # Add small regularization for numerical stability
-            reg_param = 1e-6
-            hessian += reg_param * np.eye(hessian.shape[0])
-
-            # Update parameters
-            beta_new = beta + np.linalg.solve(
-                hessian, X.T @ (p - p)
-            )  # Zero gradient since we're predicting
-
-            # Check convergence
-            if np.all(np.abs(beta_new - beta) < tol):
-                break
-            beta = beta_new
-
-        # Calculate predictions
-        z = X @ beta
-        return 1 / (1 + np.exp(-z))
+    if model in ["linear", "lm", "felm"]:
+        return X @ coef
+    elif model in ["logit", "logistic"]:
+        # Use numerically stable sigmoid computation
+        z = X @ coef
+        return _stable_sigmoid(z)
     else:
-        raise ValueError(f"Unknown model type: {model}")
+        raise ValueError(f"Unknown model type: {model}. Use 'linear', 'lm', 'felm', 'logit', or 'logistic'.")
 
 
 def dsl_residuals(
@@ -550,7 +682,7 @@ def dsl_residuals(
     if model == "lm":
         return Y - X @ par
     elif model == "logit":
-        return Y - 1 / (1 + np.exp(-X @ par))
+        return Y - _stable_sigmoid(X @ par)
     else:
         raise ValueError(f"Unknown model type: {model}")
 
@@ -584,7 +716,7 @@ def dsl_vcov(
     if model == "lm":
         pred = X @ par
     elif model == "logit":
-        pred = 1 / (1 + np.exp(-X @ par))
+        pred = _stable_sigmoid(X @ par)
     else:
         raise ValueError(f"Unknown model type: {model}")
 
