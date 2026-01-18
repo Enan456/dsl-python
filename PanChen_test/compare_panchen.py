@@ -78,11 +78,12 @@ def prepare_data_for_dsl(data):
     logger.info(f"Labeled: {labeled_count}, Unlabeled: {unlabeled_count}")
 
     # Create sample probability (equal probability for labeled observations)
-    # In R, this is calculated as n_labeled / n_total for complete cases
-    n_complete = len(complete_cases)
-    sample_prob = n_labeled / n_complete
+    # In R DSL, sample_prob = n_labeled / n_total (total population)
+    # This represents the probability that any observation was sampled for labeling
+    n_total = len(df)
+    sample_prob = n_labeled / n_total
     df["sample_prob"] = sample_prob
-    logger.info(f"Sample probability: {sample_prob}")
+    logger.info(f"Sample probability: {sample_prob:.4f} ({n_labeled}/{n_total})")
 
     # Handle missing values in predictors
     # For unlabeled data, we'll fill NAs with 0 as before
@@ -281,17 +282,18 @@ def main():
 
         print("\nRunning DSL estimation (logistic regression)...")
 
-        # Prepare X and y using patsy
-        y, X = dmatrices(formula, df, return_type="dataframe")
-
-        # Run DSL estimation using the new interface
+        # Run DSL estimation using the formula interface with predicted_var
+        # This matches R's DSL interface:
+        # - predicted_var: the variable(s) that have predictions
+        # - prediction: the column containing predictions for unlabeled observations
         result = dsl(
-            X=X.values,
-            y=y.values,
+            model="logit",
+            formula=formula,
+            data=df,
+            predicted_var=["countyWrong"],  # Variable being predicted
+            prediction="pred_countyWrong",  # Column with predictions
             labeled_ind=df["labeled"].values,
             sample_prob=df["sample_prob"].values,
-            model="logit",
-            method="logistic",
         )
 
         logger.info("DSL estimation completed successfully")
@@ -300,9 +302,12 @@ def main():
         logger.info(f"Labeled size: {result.labeled_size}")
         logger.info(f"Total size: {result.total_size}")
 
-        # Log fitted values (Xβ) and predicted probabilities for first 5 rows
-        X_np = X.values
+        # Get design matrix for logging
+        y_design, X_design = dmatrices(formula, df, return_type="dataframe")
+        X_np = X_design.values
         coefs = result.coefficients
+
+        # Log fitted values (Xβ) and predicted probabilities for first 5 rows
         xb = X_np @ coefs
         logger.info("First 5 fitted values (Xβ):")
         logger.info(f"{xb[:5]}")
@@ -322,7 +327,7 @@ def main():
 
         # Log log-likelihood at the solution
         # For logistic regression: sum(y*log(p) + (1-y)*log(1-p)) for labeled data
-        y_np = y.values.flatten()
+        y_np = y_design.values.flatten()
         labeled_mask = df["labeled"].values == 1
         y_labeled = y_np[labeled_mask]
         prob_labeled = prob[labeled_mask]

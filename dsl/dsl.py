@@ -188,7 +188,36 @@ def dsl(
             sample_prob = np.full(len(data), n_labeled / len(data))
 
         # Get predictions if provided
-        if prediction is not None and prediction in data.columns:
+        # In R DSL: predicted_var specifies which X variables are predicted
+        # prediction specifies the column containing predictions for those variables
+        if prediction is not None and prediction in data.columns and predicted_var is not None:
+            # Create X_pred by replacing predicted_var columns with their predictions
+            # CRITICAL: X (used as X_orig) should have 0s for unlabeled predicted vars
+            # X_pred should have predictions for unlabeled, actual for labeled
+            X_pred = X.copy()
+            X_col_names = list(X_df.columns)
+            labeled_mask = labeled_ind.astype(bool)
+
+            for pvar in predicted_var:
+                if pvar in X_col_names:
+                    col_idx = X_col_names.index(pvar)
+                    # X_pred uses predictions for unlabeled, actual for labeled
+                    X_pred[:, col_idx] = np.where(
+                        labeled_mask,
+                        X[:, col_idx],  # Use original for labeled
+                        data[prediction].values  # Use prediction for unlabeled
+                    )
+                    # X (X_orig) should have 0s for unlabeled to be zeroed out in moment calc
+                    # This ensures the doubly-robust formula works correctly
+                    X[:, col_idx] = np.where(
+                        labeled_mask,
+                        X[:, col_idx],  # Keep original for labeled
+                        0.0  # Zero for unlabeled (will be zeroed in m_orig anyway)
+                    )
+
+            # y_pred should use the same y values (or prediction for the outcome if applicable)
+            y_pred = y.copy()
+        elif prediction is not None and prediction in data.columns:
             y_pred = data[prediction].values
             X_pred = X.copy()
         else:
@@ -252,6 +281,9 @@ def dsl(
     labeled_ind = np.asarray(labeled_ind).flatten()
     sample_prob = np.asarray(sample_prob).flatten()
 
+    # Determine if we should use IPW mode (when predictions are in X)
+    use_ipw = predicted_var is not None and len(predicted_var) > 0
+
     # Estimate parameters using the general function
     if model_internal == "felm":
         par, info = dsl_general(
@@ -264,6 +296,7 @@ def dsl(
             model=model_internal,
             fe_Y=fe_Y,
             fe_X=fe_X,
+            use_ipw=use_ipw,
         )
     else:
         par, info = dsl_general(
@@ -274,6 +307,7 @@ def dsl(
             labeled_ind,
             sample_prob,
             model=model_internal,
+            use_ipw=use_ipw,
         )
 
     vcov = info["vcov"]

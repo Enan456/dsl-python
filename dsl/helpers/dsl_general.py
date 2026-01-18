@@ -25,6 +25,7 @@ def dsl_general(
     fe_X: Optional[np.ndarray] = None,
     moment_fn: Optional[callable] = None,
     jac_fn: Optional[callable] = None,
+    use_ipw: bool = False,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     General DSL estimation function.
@@ -53,6 +54,10 @@ def dsl_general(
         Moment function, by default None
     jac_fn : Optional[callable], optional
         Jacobian function, by default None
+    use_ipw : bool, optional
+        If True, use IPW weighting instead of doubly-robust.
+        This should be True when predictions are incorporated into X.
+        Default is False.
 
     Returns
     -------
@@ -165,6 +170,7 @@ def dsl_general(
                 X_orig_use,
                 Y_pred.flatten(),  # Ensure flattened Y
                 X_pred_use,
+                use_ipw=use_ipw,
             )
         # Objective: sum of squared mean moments
         mean_m = np.mean(m, axis=0)
@@ -218,6 +224,7 @@ def dsl_general(
                 X_orig_use,
                 Y_pred.flatten(),
                 X_pred_use,
+                use_ipw=use_ipw,
             )
 
         # Gradient: 2 * J.T @ mean(m)
@@ -388,6 +395,7 @@ def dsl_general(
             X_orig_use,
             Y_pred.flatten(),
             X_pred_use,
+            use_ipw=use_ipw,
         )
 
     # J should be (k, k), m should be (n, k)
