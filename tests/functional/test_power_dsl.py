@@ -152,7 +152,6 @@ def test_power_dsl_logistic_regression(sample_data, sample_prediction):
     assert 0 <= result.alpha <= 1
 
 
-@pytest.mark.skip(reason="Fixed effects model implementation has known issues with parameter vector dimensions")
 def test_power_dsl_fixed_effects(sample_data, sample_prediction):
     """Test power_dsl with fixed effects"""
     # Add prediction to data

@@ -454,7 +454,6 @@ def dsl_general(
                 "options": {
                     "gtol": 1e-5,
                     "maxiter": 1000,
-                    "disp": False,
                 },
             }
             result_lbfgsb = minimize(objective, par_init, **lbfgsb_options)

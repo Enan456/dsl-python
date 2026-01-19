@@ -407,10 +407,15 @@ def power_dsl(
             **kwargs,
         )
 
-    # Parse formula
+    # Parse formula (handle fixed effects notation if present)
     from patsy import dmatrices
 
-    _, X = dmatrices(formula, data, return_type="dataframe")
+    formula_main = formula
+    if model == "felm" and "|" in formula:
+        parts = formula.split("|")
+        formula_main = parts[0].strip()
+
+    _, X = dmatrices(formula_main, data, return_type="dataframe")
     X = X.values
 
     # Set default number of samples
