@@ -7,6 +7,8 @@ learning with econometric methods to handle situations where only a subset of ob
 have labels.
 """
 
+__version__ = "0.2.0"
+
 from .dsl import (
     DSLResult,
     PowerDSLResult,
@@ -18,6 +20,7 @@ from .dsl import (
 )
 
 __all__ = [
+    "__version__",
     "dsl",
     "power_dsl",
     "summary",

@@ -237,10 +237,37 @@ For methodological validation, it is sufficient to demonstrate that both impleme
 Design-based Supervised Learning for Social Science Applications of Large Language Models," Advances in Neural Information Processing Systems (NeurIPS).
 
 
+## Known Limitations
+
+The Python implementation has some known limitations compared to the R package:
+
+1. **Python-R RNG Incompatibility**: Results differ between Python and R due to different random number generators. See the comparison section above.
+
+2. **Cross-fitting Not Implemented**: The `cross_fit` and `sample_split` parameters are accepted but not yet functional.
+
+3. **No Built-in ML Methods**: Users must provide pre-computed predictions; automatic supervised learning is not yet available.
+
+4. **Fixed Effects Efficiency**: Uses dummy variable expansion rather than within-transformation.
+
+For a complete list of limitations and planned improvements, see [CHANGELOG.md](CHANGELOG.md).
+
+## Version History
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
+
+**Current Version: 0.2.0** (Beta)
+
+Key features in 0.2.0:
+- Input validation with clear error messages
+- Coefficient names in results
+- Numerically stable sigmoid for logistic regression
+- Fixed `dsl_predict()` function
+- Fixed effects power analysis support
+
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
 ## License
 
-[Specify License Information Here, e.g., MIT, GPL-3] 
+MIT License 
